@@ -15,31 +15,45 @@ function crear_usuario_nextcloud_seguro($user_id, $morder) {
         return false;
     }
 
-    // 2. Configuración base
+    // 2. Configuración base con zona horaria
+    $dt = new DateTime('now', new DateTimeZone('America/Boa_Vista'));
+    $dt->setTimestamp($morder->timestamp);
+    $fecha_pedido = $dt->format('d/m/Y H:i:s');
+    
+    // 3. Calcular próxima fecha de pago desde PMPro
+    $fecha_pago_proximo_mes = !empty($morder->next_payment_date) 
+        ? $morder->next_payment_date 
+        : (!empty($morder->enddate) ? date('Y-m-d', $morder->enddate) : '');
+
+    // 4. Configuración de URLs y autenticación
     $base_url = 'https://cloud.' . sanitize_text_field(basename(get_site_url()));
     $auth = [
         'username' => getenv('NEXTCLOUD_API_ADMIN'),
         'password' => getenv('NEXTCLOUD_API_PASS')
     ];
 
-    // 3. Determinar datos del plan
+    // 5. Determinar datos del plan
     $level = pmpro_getMembershipLevelForUser($user_id);
     $quota_parts = explode(" ", $level->name);
     $user_group = strtolower($quota_parts[1]) . $user_id;
     $is_trial = ($level->id === 5);
+    
+    // 6. Configurar mensajes según tipo de plan
+    $date_message = $is_trial ? "Avaliação gratuita até: " : "Data do próximo pagamento: ";
+    $monthly_message = $is_trial ? "" : "mensal ";
 
-    // 4. Lógica principal
+    // 7. Lógica principal
     if (!get_user_meta($user_id, 'created_in_nextcloud', true)) {
-        return crear_nuevo_usuario_nextcloud($user, $level, $base_url, $auth, $user_group, $is_trial, $morder);
+        return crear_nuevo_usuario_nextcloud($user, $level, $base_url, $auth, $user_group, $is_trial, $morder, $fecha_pedido, $fecha_pago_proximo_mes, $date_message, $monthly_message);
     } else {
-        return actualizar_usuario_nextcloud($user, $level, $base_url, $auth, $user_group);
+        return actualizar_usuario_nextcloud($user, $level, $base_url, $auth, $user_group, $morder, $fecha_pedido, $fecha_pago_proximo_mes, $date_message, $monthly_message);
     }
 }
 
 /**
  * Crea un nuevo usuario en Nextcloud usando WP HTTP API
  */
-function crear_nuevo_usuario_nextcloud($user, $level, $base_url, $auth, $user_group, $is_trial, $morder) {
+function crear_nuevo_usuario_nextcloud($user, $level, $base_url, $auth, $user_group, $is_trial, $morder, $fecha_pedido, $fecha_pago_proximo_mes, $date_message, $monthly_message) {
     $password = wp_generate_password(12, false);
     $username = sanitize_user($user->user_login);
     
@@ -119,7 +133,7 @@ function crear_nuevo_usuario_nextcloud($user, $level, $base_url, $auth, $user_gr
 
     // 5. Marcar como creado y enviar email
     update_user_meta($user->ID, 'created_in_nextcloud', true);
-    enviar_email_bienvenida($user, $password, $level, $morder, $is_trial);
+    send_plan_email($user, $password, $level, $fecha_pedido, $morder->total, $fecha_pago_proximo_mes, $date_message, $monthly_message);
 
     return true;
 }
@@ -127,8 +141,9 @@ function crear_nuevo_usuario_nextcloud($user, $level, $base_url, $auth, $user_gr
 /**
  * Actualiza un usuario existente en Nextcloud
  */
-function actualizar_usuario_nextcloud($user, $level, $base_url, $auth, $new_user_group) {
+function actualizar_usuario_nextcloud($user, $level, $base_url, $auth, $new_user_group, $morder, $fecha_pedido, $fecha_pago_proximo_mes, $date_message, $monthly_message) {
     $username = sanitize_user($user->user_login);
+    $password = "";
     
     // 1. Obtener grupo actual
     $response = wp_remote_get("$base_url/ocs/v1.php/cloud/users/$username/groups", [
@@ -209,6 +224,9 @@ function actualizar_usuario_nextcloud($user, $level, $base_url, $auth, $new_user
         ]);
     }
 
+    // 4. Enviar email
+    send_plan_email($user, $password, $level, $fecha_pedido, $morder->total, $fecha_pago_proximo_mes, $date_message, $monthly_message);
+
     return true;
 }
 
@@ -223,9 +241,9 @@ function calcular_cuota($plan_name) {
 }
 
 /**
- * Envía el email de bienvenida (similar a tu versión original)
+ * Envía el email de bienvenida o notificación de actualización de plan
  */
-function enviar_email_bienvenida($user, $password, $level, $morder, $is_trial) {
+function send_plan_email($user, $password, $level, $fecha_pedido, $total, $fecha_pago_proximo_mes, $date_message, $monthly_message) {
     $site_url = basename(get_site_url());
     $cloud_url = "https://cloud.$site_url";
     
@@ -235,9 +253,11 @@ function enviar_email_bienvenida($user, $password, $level, $morder, $is_trial) {
     <p>Prezado(a) <b><?= $user->display_name ?></b> (<?= $user->user_login ?>),</p>
     <p>Parabéns! Sua conta Nextcloud foi criada satisfatoriamente!</p>
     
-    <p>Dados da sua conta:<br/>
-    Usuário: <?= $user->user_login ?><br/>
-    Senha: <?= $password ?></p>
+    <?php if (!empty($password)) { ?>
+        <p>Dados da sua conta:<br/>
+        Usuário: <?= $user->user_login ?><br/>
+        Senha: <?= $password ?></p>
+    <?php } ?>
     
     <p>Acesso à sua conta Nextcloud: <a href="<?= $cloud_url ?>"><?= $cloud_url ?></a></p>
     
