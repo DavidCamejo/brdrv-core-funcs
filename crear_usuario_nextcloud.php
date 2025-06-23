@@ -1,173 +1,231 @@
 <?php
 /**
- * Crea o actualiza usuario en Nextcloud manteniendo el aislamiento por grupos
- * 
- * @param int $user_id ID de usuario WordPress
- * @param object $morder Objeto de orden de PMPro
- * @return void
+ * Gestiona la creación/actualización de usuarios en Nextcloud usando WP HTTP API
  */
-function crear_usuario_nextcloud_optimizado($user_id, $morder) {
-    // 1. Verificar si el usuario ya existe en Nextcloud
-    $created_in_nextcloud = get_user_meta($user_id, 'created_in_nextcloud', true);
-    
-    // 2. Obtener datos del usuario
+function crear_usuario_nextcloud_seguro($user_id, $morder) {
+    // 1. Verificación inicial
+    if (!getenv('NEXTCLOUD_API_ADMIN') || !getenv('NEXTCLOUD_API_PASS')) {
+        error_log('Error: Credenciales de Nextcloud no configuradas');
+        return false;
+    }
+
     $user = get_userdata($user_id);
     if (!$user) {
-        error_log("Usuario WordPress no encontrado (ID: $user_id)");
-        return;
+        error_log("Error: Usuario WordPress no encontrado (ID: $user_id)");
+        return false;
     }
 
-    // 3. Configuración básica
-    $username = sanitize_user($user->user_login);
-    $email = sanitize_email($user->user_email);
-    $displayname = $user->display_name ?: $username;
+    // 2. Configuración base
+    $base_url = 'https://cloud.' . sanitize_text_field(basename(get_site_url()));
+    $auth = [
+        'username' => getenv('NEXTCLOUD_API_ADMIN'),
+        'password' => getenv('NEXTCLOUD_API_PASS')
+    ];
+
+    // 3. Determinar datos del plan
     $level = pmpro_getMembershipLevelForUser($user_id);
-    
-    // 4. Configuración de zona horaria y fechas
-    $dt = new DateTime('now', new DateTimeZone('America/Boa_Vista'));
-    $dt->setTimestamp($morder->timestamp);
-    $fecha_pedido = $dt->format('d/m/Y H:i:s');
-    $fecha_pago_proximo_mes = ajustar_proxima_fecha_pago($user_id);
-
-    // 5. Determinar configuración del plan
     $quota_parts = explode(" ", $level->name);
-    $plan_type = strtolower($quota_parts[1]);
-    $user_group = $plan_type . $user_id;
-    $total_quota = ($quota_parts[2] >= 1000) ? $quota_parts[2]/1000 : $quota_parts[2];
-    $measure_quota = ($quota_parts[2] >= 1000) ? "TB" : "GB";
-    $user_quota = $total_quota . $measure_quota;
-    $user_status = '{"statusType": "invisible"}';
-    $locale = 'pt_BR';
-
-    // 6. Mensajes según tipo de plan
+    $user_group = strtolower($quota_parts[1]) . $user_id;
     $is_trial = ($level->id === 5);
-    $date_message = $is_trial ? "Avaliação gratuita até: " : "Data do próximo pagamento: ";
-    $monthly_message = $is_trial ? "" : "mensal ";
 
-    // 7. Obtener credenciales de Nextcloud
-    $nextcloud_api_admin = getenv('NEXTCLOUD_API_ADMIN');
-    $nextcloud_api_pass = getenv('NEXTCLOUD_API_PASS');
-    
-    if (!$nextcloud_api_admin || !$nextcloud_api_pass) {
-        error_log("Credenciales de Nextcloud no configuradas");
-        return;
-    }
-
-    $base_url = "https://cloud." . basename(get_site_url());
-    $auth = "$nextcloud_api_admin:$nextcloud_api_pass";
-    $headers = ['OCS-APIRequest: true'];
-
-    // 8. Lógica para nuevo usuario
-    if (!$created_in_nextcloud) {
-        $password = wp_generate_password(12, false);
-        $nc_auth = "$username:$password";
-
-        // Comandos para creación de usuario
-        $commands = [
-            // Crear grupo
-            build_curl_command($base_url, $auth, 'POST', '/ocs/v1.php/cloud/groups', ['groupid' => $user_group]),
-            
-            // Crear usuario
-            build_curl_command($base_url, $auth, 'POST', '/ocs/v1.php/cloud/users', [
-                'userid' => $username,
-                'password' => $password,
-                'groups[]' => $user_group
-            ]),
-            
-            // Configurar atributos
-            build_curl_command($base_url, $auth, 'PUT', "/ocs/v1.php/cloud/users/$username", ['key' => 'displayname', 'value' => $displayname]),
-            build_curl_command($base_url, $auth, 'PUT', "/ocs/v1.php/cloud/users/$username", ['key' => 'email', 'value' => $email]),
-            build_curl_command($base_url, $auth, 'PUT', "/ocs/v1.php/cloud/users/$username", ['key' => 'quota', 'value' => $user_quota]),
-            build_curl_command($base_url, $auth, 'PUT', "/ocs/v1.php/cloud/users/$username", ['key' => 'profile_enabled', 'value' => 'false']),
-            
-            // Configurar estado y localización
-            build_curl_command($base_url, $nc_auth, 'PUT', '/ocs/v2.php/apps/user_status/api/v1/user_status/status', 
-                $user_status, ['Content-Type: application/json']),
-                
-            build_curl_command($base_url, $auth, 'PUT', "/ocs/v1.php/cloud/users/$username", ['key' => 'locale', 'value' => $locale]),
-            
-            // Notificación al admin
-            build_curl_command($base_url, $auth, 'POST', '/ocs/v2.php/apps/notifications/api/v2/admin_notifications/' . $nextcloud_api_admin, [
-                'shortMessage' => 'Nova conta criada',
-                'longMessage' => "Foi criada a conta {$level->name} do $username."
-            ])
-        ];
-
-        // Ejecutar comandos
-        execute_commands($commands);
-
-        // Marcar como creado y enviar email
-        update_user_meta($user_id, 'created_in_nextcloud', true);
-        send_welcome_email($user, $password, $level, $fecha_pedido, $morder->total, $fecha_pago_proximo_mes, $date_message, $monthly_message);
-    } 
-    // 9. Lógica para actualización de usuario existente
-    else {
-        $new_user_group = $plan_type . $user_id;
-        
-        // Obtener grupo actual
-        $response = shell_exec(build_curl_command($base_url, $auth, 'GET', "/ocs/v1.php/cloud/users/$username/groups"));
-        $old_user_group = simplexml_load_string($response)->data->groups->element;
-
-        // Comandos para actualización
-        $commands = [
-            // Actualizar quota
-            build_curl_command($base_url, $auth, 'PUT', "/ocs/v1.php/cloud/users/$username", ['key' => 'quota', 'value' => $user_quota]),
-            
-            // Notificar usuario
-            build_curl_command($base_url, $auth, 'POST', "/ocs/v2.php/apps/notifications/api/v2/admin_notifications/$username", [
-                'shortMessage' => 'Atualização do plano',
-                'longMessage' => "Seu plano foi atualizado para: {$level->name}. Esperamos que você aproveite ao máximo."
-            ]),
-            
-            // Manejo de grupos
-            build_curl_command($base_url, $auth, 'POST', '/ocs/v1.php/cloud/groups', ['groupid' => $new_user_group]),
-            build_curl_command($base_url, $auth, 'POST', "/ocs/v1.php/cloud/users/$username/groups", ['groupid' => $new_user_group]),
-            build_curl_command($base_url, $auth, 'DELETE', "/ocs/v1.php/cloud/users/$username/groups", ['groupid' => $old_user_group]),
-            build_curl_command($base_url, $auth, 'DELETE', "/ocs/v1.php/cloud/groups/$old_user_group")
-        ];
-
-        // Ejecutar comandos
-        execute_commands($commands);
+    // 4. Lógica principal
+    if (!get_user_meta($user_id, 'created_in_nextcloud', true)) {
+        return crear_nuevo_usuario_nextcloud($user, $level, $base_url, $auth, $user_group, $is_trial, $morder);
+    } else {
+        return actualizar_usuario_nextcloud($user, $level, $base_url, $auth, $user_group);
     }
 }
 
-// Funciones auxiliares
-
 /**
- * Construye comando cURL
+ * Crea un nuevo usuario en Nextcloud usando WP HTTP API
  */
-function build_curl_command($base_url, $auth, $method, $endpoint, $data = [], $extra_headers = []) {
-    $headers = array_merge(['OCS-APIRequest: true'], $extra_headers);
-    $header_str = implode(' -H \'', $headers) . '\'';
+function crear_nuevo_usuario_nextcloud($user, $level, $base_url, $auth, $user_group, $is_trial, $morder) {
+    $password = wp_generate_password(12, false);
+    $username = sanitize_user($user->user_login);
     
-    $data_str = '';
-    foreach ($data as $key => $value) {
-        $data_str .= " -d '$key=$value'";
+    // 1. Crear grupo
+    $response = wp_remote_post("$base_url/ocs/v1.php/cloud/groups", [
+        'headers' => [
+            'OCS-APIRequest' => 'true',
+            'Authorization' => 'Basic ' . base64_encode("{$auth['username']}:{$auth['password']}"),
+            'Content-Type' => 'application/x-www-form-urlencoded',
+        ],
+        'body' => ['groupid' => $user_group],
+        'timeout' => 15,
+    ]);
+
+    if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
+        error_log('Error al crear grupo en Nextcloud');
+        return false;
     }
-    
-    return "curl -H '$header_str' -u $auth -X $method '$base_url$endpoint'$data_str";
-}
 
-/**
- * Ejecuta comandos con manejo de errores
- */
-function execute_commands($commands) {
-    foreach ($commands as $command) {
-        $output = shell_exec($command);
-        sleep(1); // Espera entre comandos
-        
-        // Verificar errores (simplificado)
-        if (strpos($output, '"statuscode":100') === false) {
-            error_log("Error en comando Nextcloud: $command");
-            error_log("Salida: $output");
+    // 2. Crear usuario
+    $response = wp_remote_post("$base_url/ocs/v1.php/cloud/users", [
+        'headers' => [
+            'OCS-APIRequest' => 'true',
+            'Authorization' => 'Basic ' . base64_encode("{$auth['username']}:{$auth['password']}"),
+            'Content-Type' => 'application/x-www-form-urlencoded',
+        ],
+        'body' => [
+            'userid' => $username,
+            'password' => $password,
+            'groups[]' => $user_group,
+        ],
+        'timeout' => 15,
+    ]);
+
+    if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
+        error_log('Error al crear usuario en Nextcloud');
+        return false;
+    }
+
+    // 3. Configurar atributos del usuario
+    $attributes = [
+        ['key' => 'displayname', 'value' => $user->display_name ?: $username],
+        ['key' => 'email', 'value' => sanitize_email($user->user_email)],
+        ['key' => 'quota', 'value' => calcular_cuota($level->name)],
+        ['key' => 'profile_enabled', 'value' => 'false'],
+        ['key' => 'locale', 'value' => 'pt_BR'],
+    ];
+
+    foreach ($attributes as $attr) {
+        $response = wp_remote_request("$base_url/ocs/v1.php/cloud/users/$username", [
+            'method' => 'PUT',
+            'headers' => [
+                'OCS-APIRequest' => 'true',
+                'Authorization' => 'Basic ' . base64_encode("{$auth['username']}:{$auth['password']}"),
+                'Content-Type' => 'application/x-www-form-urlencoded',
+            ],
+            'body' => $attr,
+            'timeout' => 15,
+        ]);
+
+        if (is_wp_error($response)) {
+            error_log("Error al configurar atributo {$attr['key']}");
         }
     }
+
+    // 4. Configurar estado del usuario
+    $response = wp_remote_request("$base_url/ocs/v2.php/apps/user_status/api/v1/user_status/status", [
+        'method' => 'PUT',
+        'headers' => [
+            'OCS-APIRequest' => 'true',
+            'Authorization' => 'Basic ' . base64_encode("$username:$password"),
+            'Content-Type' => 'application/json',
+        ],
+        'body' => json_encode(['statusType' => 'invisible']),
+        'timeout' => 15,
+    ]);
+
+    // 5. Marcar como creado y enviar email
+    update_user_meta($user->ID, 'created_in_nextcloud', true);
+    enviar_email_bienvenida($user, $password, $level, $morder, $is_trial);
+
+    return true;
 }
 
 /**
- * Envía email de bienvenida
+ * Actualiza un usuario existente en Nextcloud
  */
-function send_welcome_email($user, $password, $level, $fecha_pedido, $total, $fecha_pago_proximo_mes, $date_message, $monthly_message) {
+function actualizar_usuario_nextcloud($user, $level, $base_url, $auth, $new_user_group) {
+    $username = sanitize_user($user->user_login);
+    
+    // 1. Obtener grupo actual
+    $response = wp_remote_get("$base_url/ocs/v1.php/cloud/users/$username/groups", [
+        'headers' => [
+            'OCS-APIRequest' => 'true',
+            'Authorization' => 'Basic ' . base64_encode("{$auth['username']}:{$auth['password']}"),
+        ],
+        'timeout' => 15,
+    ]);
+
+    if (is_wp_error($response)) {
+        error_log('Error al obtener grupos del usuario');
+        return false;
+    }
+
+    $xml = simplexml_load_string(wp_remote_retrieve_body($response));
+    $old_user_group = (string)$xml->data->groups->element[0];
+
+    // 2. Actualizar cuota
+    $response = wp_remote_request("$base_url/ocs/v1.php/cloud/users/$username", [
+        'method' => 'PUT',
+        'headers' => [
+            'OCS-APIRequest' => 'true',
+            'Authorization' => 'Basic ' . base64_encode("{$auth['username']}:{$auth['password']}"),
+            'Content-Type' => 'application/x-www-form-urlencoded',
+        ],
+        'body' => [
+            'key' => 'quota',
+            'value' => calcular_cuota($level->name),
+        ],
+        'timeout' => 15,
+    ]);
+
+    // 3. Manejar grupos
+    if ($old_user_group !== $new_user_group) {
+        // Crear nuevo grupo
+        wp_remote_post("$base_url/ocs/v1.php/cloud/groups", [
+            'headers' => [
+                'OCS-APIRequest' => 'true',
+                'Authorization' => 'Basic ' . base64_encode("{$auth['username']}:{$auth['password']}"),
+                'Content-Type' => 'application/x-www-form-urlencoded',
+            ],
+            'body' => ['groupid' => $new_user_group],
+            'timeout' => 15,
+        ]);
+
+        // Añadir a nuevo grupo
+        wp_remote_post("$base_url/ocs/v1.php/cloud/users/$username/groups", [
+            'headers' => [
+                'OCS-APIRequest' => 'true',
+                'Authorization' => 'Basic ' . base64_encode("{$auth['username']}:{$auth['password']}"),
+                'Content-Type' => 'application/x-www-form-urlencoded',
+            ],
+            'body' => ['groupid' => $new_user_group],
+            'timeout' => 15,
+        ]);
+
+        // Eliminar de grupo anterior
+        wp_remote_request("$base_url/ocs/v1.php/cloud/users/$username/groups", [
+            'method' => 'DELETE',
+            'headers' => [
+                'OCS-APIRequest' => 'true',
+                'Authorization' => 'Basic ' . base64_encode("{$auth['username']}:{$auth['password']}"),
+                'Content-Type' => 'application/x-www-form-urlencoded',
+            ],
+            'body' => ['groupid' => $old_user_group],
+            'timeout' => 15,
+        ]);
+
+        // Eliminar grupo anterior (opcional)
+        wp_remote_request("$base_url/ocs/v1.php/cloud/groups/$old_user_group", [
+            'method' => 'DELETE',
+            'headers' => [
+                'OCS-APIRequest' => 'true',
+                'Authorization' => 'Basic ' . base64_encode("{$auth['username']}:{$auth['password']}"),
+            ],
+            'timeout' => 15,
+        ]);
+    }
+
+    return true;
+}
+
+/**
+ * Calcula la cuota basada en el nombre del plan
+ */
+function calcular_cuota($plan_name) {
+    $quota_parts = explode(" ", $plan_name);
+    $total = ($quota_parts[2] >= 1000) ? $quota_parts[2]/1000 : $quota_parts[2];
+    $measure = ($quota_parts[2] >= 1000) ? "TB" : "GB";
+    return $total . $measure;
+}
+
+/**
+ * Envía el email de bienvenida (similar a tu versión original)
+ */
+function enviar_email_bienvenida($user, $password, $level, $morder, $is_trial) {
     $site_url = basename(get_site_url());
     $cloud_url = "https://cloud.$site_url";
     
