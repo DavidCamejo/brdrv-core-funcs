@@ -1,213 +1,205 @@
 <?php
-function crear_usuario_nextcloud($user_id, $morder) {
-    // Verificar si el usuario fue creado previamente en Nextcloud
+/**
+ * Crea o actualiza usuario en Nextcloud manteniendo el aislamiento por grupos
+ * 
+ * @param int $user_id ID de usuario WordPress
+ * @param object $morder Objeto de orden de PMPro
+ * @return void
+ */
+function crear_usuario_nextcloud_optimizado($user_id, $morder) {
+    // 1. Verificar si el usuario ya existe en Nextcloud
     $created_in_nextcloud = get_user_meta($user_id, 'created_in_nextcloud', true);
-
-    // Obtener información del usuario
+    
+    // 2. Obtener datos del usuario
     $user = get_userdata($user_id);
     if (!$user) {
-        return new WP_Error('user_not_found', 'Usuario no encontrado.');
+        error_log("Usuario WordPress no encontrado (ID: $user_id)");
+        return;
     }
 
-    $email = $user->user_email;
-    $username = $user->user_login;
-    $displayname = $user->display_name;
+    // 3. Configuración básica
+    $username = sanitize_user($user->user_login);
+    $email = sanitize_email($user->user_email);
+    $displayname = $user->display_name ?: $username;
     $level = pmpro_getMembershipLevelForUser($user_id);
-
-    if (!$level) {
-        return new WP_Error('level_not_found', 'Nivel de membresía no encontrado.');
-    }
-
-    $dt = new DateTime();
-    $dt->setTimezone(new DateTimeZone('America/Boa_Vista'));
+    
+    // 4. Configuración de zona horaria y fechas
+    $dt = new DateTime('now', new DateTimeZone('America/Boa_Vista'));
     $dt->setTimestamp($morder->timestamp);
-
-    // Obtener la fecha del próximo pago
     $fecha_pedido = $dt->format('d/m/Y H:i:s');
     $fecha_pago_proximo_mes = ajustar_proxima_fecha_pago($user_id);
 
-    // Get the User Plan level
-    $plan_level = $level->id;
-
-    // Variables quota, status, curl, shell
-    $quota = explode(" ", $level->name);
-    $user_group = strtolower($quota[1]) . $user_id;
-    $total_quota = ($quota[2] >= 1000) ? $quota[2] / 1000 : $quota[2];
-    $measure_quota = ($quota[2] >= 1000) ? "TB" : "GB";
+    // 5. Determinar configuración del plan
+    $quota_parts = explode(" ", $level->name);
+    $plan_type = strtolower($quota_parts[1]);
+    $user_group = $plan_type . $user_id;
+    $total_quota = ($quota_parts[2] >= 1000) ? $quota_parts[2]/1000 : $quota_parts[2];
+    $measure_quota = ($quota_parts[2] >= 1000) ? "TB" : "GB";
     $user_quota = $total_quota . $measure_quota;
     $user_status = '{"statusType": "invisible"}';
     $locale = 'pt_BR';
 
-    if ($plan_level !== 5) {
-        $date_message = "Data do próximo pagamento: ";
-        $monthly_message = "mensal ";
-    } else {
-        $date_message = "Avaliação gratuita até: ";
-        $monthly_message = "";
+    // 6. Mensajes según tipo de plan
+    $is_trial = ($level->id === 5);
+    $date_message = $is_trial ? "Avaliação gratuita até: " : "Data do próximo pagamento: ";
+    $monthly_message = $is_trial ? "" : "mensal ";
+
+    // 7. Obtener credenciales de Nextcloud
+    $nextcloud_api_admin = getenv('NEXTCLOUD_API_ADMIN');
+    $nextcloud_api_pass = getenv('NEXTCLOUD_API_PASS');
+    
+    if (!$nextcloud_api_admin || !$nextcloud_api_pass) {
+        error_log("Credenciales de Nextcloud no configuradas");
+        return;
     }
 
-    // Leer credenciales del administrador
-    $nextcloud_api_admin = base64_decode(get_option('nextcloud_api_admin'));
-    $nextcloud_api_pass = base64_decode(get_option('nextcloud_api_pass'));
-    $nextcloud_autentication = $nextcloud_api_admin . ':' . $nextcloud_api_pass;
-    $nextcloud_header = "OCS-APIRequest: true";
-    $notifications_link = "/ocs/v2.php/apps/notifications/api/v2/admin_notifications/";
-    $notification_url = "https://cloud." . basename(get_site_url()) . $notifications_link;
+    $base_url = "https://cloud." . basename(get_site_url());
+    $auth = "$nextcloud_api_admin:$nextcloud_api_pass";
+    $headers = ['OCS-APIRequest: true'];
 
-    // Si no se ha creado la cuenta en Nextcloud, proceder con su creación
+    // 8. Lógica para nuevo usuario
     if (!$created_in_nextcloud) {
-        // Generar password para la nueva cuenta Nextcloud
         $password = wp_generate_password(12, false);
-        $ncnewuser_autentication = $username . ":" . $password;
+        $nc_auth = "$username:$password";
 
-        $to_admin_subject = 'Nova conta criada';
-        $to_admin_smessage = 'Foi criada a conta ' . $level->name . ' do ' . $username . '.';
-
-        // Crear usuario en Nextcloud
-        $requests = [
-            ['url' => 'https://cloud.brasdrive.com.br/ocs/v1.php/cloud/groups', 'data' => ['groupid' => $user_group]],
-            ['url' => 'https://cloud.brasdrive.com.br/ocs/v1.php/cloud/users?format=json', 'data' => ['userid' => $username, 'password' => $password, 'groups[]' => $user_group]],
-            ['url' => 'https://cloud.brasdrive.com.br/ocs/v1.php/cloud/users/' . $username, 'data' => ['key' => 'displayname', 'value' => $displayname]],
-            ['url' => 'https://cloud.brasdrive.com.br/ocs/v1.php/cloud/users/' . $username, 'data' => ['key' => 'email', 'value' => $email]],
-            ['url' => 'https://cloud.brasdrive.com.br/ocs/v1.php/cloud/users/' . $username, 'data' => ['key' => 'quota', 'value' => $user_quota]],
-            ['url' => 'https://cloud.brasdrive.com.br/ocs/v1.php/cloud/users/' . $username, 'data' => ['key' => 'profile_enabled', 'value' => 'false']],
-            ['url' => 'https://cloud.brasdrive.com.br/ocs/v2.php/apps/user_status/api/v1/user_status/status', 'data' => $user_status, 'headers' => ['Content-Type: application/json'], 'auth' => $ncnewuser_autentication],
-            ['url' => 'https://cloud.brasdrive.com.br/ocs/v1.php/cloud/users/' . $username, 'data' => ['key' => 'locale', 'value' => $locale]],
-            ['url' => $notification_url . $nextcloud_api_admin, 'data' => ['shortMessage' => $to_admin_subject, 'longMessage' => $to_admin_smessage]],
+        // Comandos para creación de usuario
+        $commands = [
+            // Crear grupo
+            build_curl_command($base_url, $auth, 'POST', '/ocs/v1.php/cloud/groups', ['groupid' => $user_group]),
+            
+            // Crear usuario
+            build_curl_command($base_url, $auth, 'POST', '/ocs/v1.php/cloud/users', [
+                'userid' => $username,
+                'password' => $password,
+                'groups[]' => $user_group
+            ]),
+            
+            // Configurar atributos
+            build_curl_command($base_url, $auth, 'PUT', "/ocs/v1.php/cloud/users/$username", ['key' => 'displayname', 'value' => $displayname]),
+            build_curl_command($base_url, $auth, 'PUT', "/ocs/v1.php/cloud/users/$username", ['key' => 'email', 'value' => $email]),
+            build_curl_command($base_url, $auth, 'PUT', "/ocs/v1.php/cloud/users/$username", ['key' => 'quota', 'value' => $user_quota]),
+            build_curl_command($base_url, $auth, 'PUT', "/ocs/v1.php/cloud/users/$username", ['key' => 'profile_enabled', 'value' => 'false']),
+            
+            // Configurar estado y localización
+            build_curl_command($base_url, $nc_auth, 'PUT', '/ocs/v2.php/apps/user_status/api/v1/user_status/status', 
+                $user_status, ['Content-Type: application/json']),
+                
+            build_curl_command($base_url, $auth, 'PUT', "/ocs/v1.php/cloud/users/$username", ['key' => 'locale', 'value' => $locale]),
+            
+            // Notificación al admin
+            build_curl_command($base_url, $auth, 'POST', '/ocs/v2.php/apps/notifications/api/v2/admin_notifications/' . $nextcloud_api_admin, [
+                'shortMessage' => 'Nova conta criada',
+                'longMessage' => "Foi criada a conta {$level->name} do $username."
+            ])
         ];
 
-        $responses = [];
-        foreach ($requests as $request) {
-            $args = [
-                'headers' => [$nextcloud_header],
-                'body' => $request['data'],
-                'auth' => $request['auth'] ?? $nextcloud_autentication,
-            ];
-            $response = wp_remote_post($request['url'], $args);
-            if (is_wp_error($response)) {
-                return $response;
-            }
-            $responses[] = $response;
-            sleep(1);
-        }
+        // Ejecutar comandos
+        execute_commands($commands);
 
-        $new_account = true;
-    } else {
-        $short_message = 'Atualização do plano';
-        $long_message = 'Seu plano foi atualizado para: ' . $level->name . '. Esperamos que você aproveite ao máximo.';
-        $new_user_group = strtolower($quota[1]) . $user_id;
-
-        $response = wp_remote_get('https://cloud.brasdrive.com.br/ocs/v1.php/cloud/users/' . $username . '/groups', [
-            'headers' => [$nextcloud_header],
-            'auth' => $nextcloud_autentication,
-        ]);
-
-        if (is_wp_error($response)) {
-            return $response;
-        }
-
-        $simplexml = simplexml_load_string($response['body']);
-        $json = json_encode($simplexml);
-        $obj = json_decode($json);
-        $old_user_group = $obj->data->groups->element;
-
-        $requests = [
-            ['url' => 'https://cloud.brasdrive.com.br/ocs/v1.php/cloud/users/' . $username, 'data' => ['key' => 'quota', 'value' => $user_quota]],
-            ['url' => $notification_url . $username, 'data' => ['shortMessage' => $short_message, 'longMessage' => $long_message]],
-            ['url' => 'https://cloud.brasdrive.com.br/ocs/v1.php/cloud/groups', 'data' => ['groupid' => $new_user_group]],
-            ['url' => 'https://cloud.brasdrive.com.br/ocs/v1.php/cloud/users/' . $username . '/groups', 'data' => ['groupid' => $new_user_group]],
-            ['url' => 'https://cloud.brasdrive.com.br/ocs/v1.php/cloud/users/' . $username . '/groups', 'data' => ['groupid' => $old_user_group], 'method' => 'DELETE'],
-            ['url' => 'https://cloud.brasdrive.com.br/ocs/v1.php/cloud/groups/' . $old_user_group, 'method' => 'DELETE'],
-        ];
-
-        $responses = [];
-        foreach ($requests as $request) {
-            $args = [
-                'headers' => [$nextcloud_header],
-                'body' => $request['data'],
-                'method' => $request['method'] ?? 'POST',
-                'auth' => $nextcloud_autentication,
-            ];
-            $response = wp_remote_request($request['url'], $args);
-            if (is_wp_error($response)) {
-                return $response;
-            }
-            $responses[] = $response;
-        }
-
-        $new_account = false;
-    }
-
-    // Verificar si hubo errores en las solicitudes de API
-    $error_occurred = false;
-    $error_message = '';
-
-    foreach ($responses as $response) {
-        $body = json_decode($response['body']);
-        if ($body->ocs->meta->statuscode !== 100) {
-            $error_occurred = true;
-            $error_message = "Error en la solicitud de API: " . $body->ocs->meta->message . "\n";
-            break;
-        }
-    }
-
-    if ($error_occurred) {
-        $to = get_option('admin_email');
-        $subject = $new_account ? 'Error en la creación de usuario en Nextcloud' : 'Error al actualizar plan de usuario en Nextcloud';
-        $message = 'Se ha producido un error. Los detalles del error son los siguientes:' . "\n\n" . $error_message;
-
-        wp_mail($to, $subject, $message);
-        return new WP_Error('api_error', $error_message);
-    }
-
-    if ($new_account) {
+        // Marcar como creado y enviar email
         update_user_meta($user_id, 'created_in_nextcloud', true);
+        send_welcome_email($user, $password, $level, $fecha_pedido, $morder->total, $fecha_pago_proximo_mes, $date_message, $monthly_message);
+    } 
+    // 9. Lógica para actualización de usuario existente
+    else {
+        $new_user_group = $plan_type . $user_id;
+        
+        // Obtener grupo actual
+        $response = shell_exec(build_curl_command($base_url, $auth, 'GET', "/ocs/v1.php/cloud/users/$username/groups"));
+        $old_user_group = simplexml_load_string($response)->data->groups->element;
 
-        // Cloud URL
-        $cloud_url = 'https://cloud.' . basename(get_site_url());
-        $client_cloud_url = $cloud_url . '/remote.php/dav/files/' . $username;
+        // Comandos para actualización
+        $commands = [
+            // Actualizar quota
+            build_curl_command($base_url, $auth, 'PUT', "/ocs/v1.php/cloud/users/$username", ['key' => 'quota', 'value' => $user_quota]),
+            
+            // Notificar usuario
+            build_curl_command($base_url, $auth, 'POST', "/ocs/v2.php/apps/notifications/api/v2/admin_notifications/$username", [
+                'shortMessage' => 'Atualização do plano',
+                'longMessage' => "Seu plano foi atualizado para: {$level->name}. Esperamos que você aproveite ao máximo."
+            ]),
+            
+            // Manejo de grupos
+            build_curl_command($base_url, $auth, 'POST', '/ocs/v1.php/cloud/groups', ['groupid' => $new_user_group]),
+            build_curl_command($base_url, $auth, 'POST', "/ocs/v1.php/cloud/users/$username/groups", ['groupid' => $new_user_group]),
+            build_curl_command($base_url, $auth, 'DELETE', "/ocs/v1.php/cloud/users/$username/groups", ['groupid' => $old_user_group]),
+            build_curl_command($base_url, $auth, 'DELETE', "/ocs/v1.php/cloud/groups/$old_user_group")
+        ];
 
-        // App links
-        $google_play = "https://play.google.com/store/apps/details?id=com.nextcloud.client";
-        $f_droid = "https://f-droid.org/pt_BR/packages/com.nextcloud.client/";
-        $app_store = "https://itunes.apple.com/br/app/nextcloud/id1125420102?mt=8";
-
-        // mailto
-        $brdrv_email = "cloud@" . basename(get_site_url());
-        $mailto = "mailto:" . $brdrv_email;
-
-        //Título de email
-        $subject = "Sua conta Nextcloud foi criada";
-        //mensaje
-        $message = "<h1>Cloud Brasdrive</h1>";
-        $message .= "<p>Prezado(a) <b>" . $displayname . "</b> (" . $username . "),</p>";
-        $message .= "<p>Parabéns! Sua conta Nextcloud foi criada satisfatoriamente!</p>";
-        $message .= "<p>Dados da sua conta:<br/>";
-        $message .= "Usuário: " . $username . "<br/>";
-        $message .= "Senha: " . $password . "</p>";
-        $message .= "<p>Acesso à sua conta Nextcloud: <a href='" . $cloud_url . "'>" . $cloud_url . "</a></p>";
-        $message .= "<p>Baixe o aplicativo <strong>Nextcloud Files</strong>:<br/>";
-        $message .= "<a href='" . $google_play . "' >Google Play</a><br/>";
-        $message .= "<a href='" . $f_droid . "' >F-Droid</a><br/>";
-        $message .= "<a href='" . $app_store . "' >App Store</a><br/>";
-        $message .= "Baixe o <strong>Nextcloud Desktop</strong> para Windows, macOS ou Linux: <a href='https://nextcloud.com/install'>Baixar</a><br/>";
-        $message .= "Conecte o aplicativo utilizando o link <a href='" . $cloud_url . "'>" . $cloud_url . "</a>, com seu usuário e sua senha.</p>";
-        $message .= "<p>Para conectar clientes WebDAV utilice: <a href='" . $client_cloud_url . "'>" . $client_cloud_url . "</a>, com seu usuário e sua senha.</p>";
-
-        $message .= "<p>Seu plano: <b>" . $level->name . "</b></p>";
-        $message .= "<p>Data do seu pedido: " . $fecha_pedido . "<br/>";
-        $message .= "Valor " . $monthly_message . "do seu plano: <b>R$ " . number_format($morder->total, 2, ',', '.') . "</b><br/>";
-        $message .= $date_message . date('d/m/Y', strtotime($fecha_pago_proximo_mes)) . "</p>";
-        $message .= "<p><b>Por segurança, recomendamos manter guardada a senha do Nextcloud em um local seguro e excluir esse e-mail.</b> Você também pode alterar sua senha nas Configurações pessoais da sua conta Nextcloud.</p>";
-        $message .= "<p>Se você tiver alguma dúvida, entre em contato conosco no e-mail: <a href='" . $mailto . "'>" . $brdrv_email . "</a>.</p>";
-        $message .= "Atenciosamente,<br/>Equipe Brasdrive";
-
-        $headers = array('Content-Type: text/html; charset=UTF-8');
-
-        //enviar correo
-        wp_mail($email, $subject, $message, $headers);
+        // Ejecutar comandos
+        execute_commands($commands);
     }
-
-    return true;
 }
-?>
+
+// Funciones auxiliares
+
+/**
+ * Construye comando cURL
+ */
+function build_curl_command($base_url, $auth, $method, $endpoint, $data = [], $extra_headers = []) {
+    $headers = array_merge(['OCS-APIRequest: true'], $extra_headers);
+    $header_str = implode(' -H \'', $headers) . '\'';
+    
+    $data_str = '';
+    foreach ($data as $key => $value) {
+        $data_str .= " -d '$key=$value'";
+    }
+    
+    return "curl -H '$header_str' -u $auth -X $method '$base_url$endpoint'$data_str";
+}
+
+/**
+ * Ejecuta comandos con manejo de errores
+ */
+function execute_commands($commands) {
+    foreach ($commands as $command) {
+        $output = shell_exec($command);
+        sleep(1); // Espera entre comandos
+        
+        // Verificar errores (simplificado)
+        if (strpos($output, '"statuscode":100') === false) {
+            error_log("Error en comando Nextcloud: $command");
+            error_log("Salida: $output");
+        }
+    }
+}
+
+/**
+ * Envía email de bienvenida
+ */
+function send_welcome_email($user, $password, $level, $fecha_pedido, $total, $fecha_pago_proximo_mes, $date_message, $monthly_message) {
+    $site_url = basename(get_site_url());
+    $cloud_url = "https://cloud.$site_url";
+    
+    ob_start();
+    ?>
+    <h1>Cloud Brasdrive</h1>
+    <p>Prezado(a) <b><?= $user->display_name ?></b> (<?= $user->user_login ?>),</p>
+    <p>Parabéns! Sua conta Nextcloud foi criada satisfatoriamente!</p>
+    
+    <p>Dados da sua conta:<br/>
+    Usuário: <?= $user->user_login ?><br/>
+    Senha: <?= $password ?></p>
+    
+    <p>Acesso à sua conta Nextcloud: <a href="<?= $cloud_url ?>"><?= $cloud_url ?></a></p>
+    
+    <p>Baixe o aplicativo <strong>Nextcloud Files</strong>:<br/>
+    <a href="https://play.google.com/store/apps/details?id=com.nextcloud.client">Google Play</a><br/>
+    <a href="https://f-droid.org/pt_BR/packages/com.nextcloud.client/">F-Droid</a><br/>
+    <a href="https://itunes.apple.com/br/app/nextcloud/id1125420102?mt=8">App Store</a><br/>
+    Baixe o <strong>Nextcloud Desktop</strong> para Windows, macOS ou Linux: <a href="https://nextcloud.com/install">Baixar</a></p>
+    
+    <p>Seu plano: <b><?= $level->name ?></b></p>
+    <p>Data do seu pedido: <?= $fecha_pedido ?><br/>
+    Valor <?= $monthly_message ?>do seu plano: <b>R$ <?= number_format($total, 2, ',', '.') ?></b><br/>
+    <?= $date_message . date('d/m/Y', strtotime($fecha_pago_proximo_mes)) ?></p>
+    
+    <p><b>Por segurança, recomendamos manter guardada a senha do Nextcloud em um local seguro e excluir esse e-mail.</b></p>
+    <p>Atenciosamente,<br/>Equipe Brasdrive</p>
+    <?php
+    
+    $message = ob_get_clean();
+    $headers = ['Content-Type: text/html; charset=UTF-8'];
+    
+    wp_mail($user->user_email, "Sua conta Nextcloud foi criada", $message, $headers);
+}
