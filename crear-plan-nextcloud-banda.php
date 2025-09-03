@@ -377,7 +377,6 @@ function call_nextcloud_api($endpoint, $method = 'POST', $data = []) {
     $nextcloud_api_pass = getenv('NEXTCLOUD_API_PASS');
 
     $nextcloud_url = trailingslashit($nextcloud_api_url) . 'ocs/v1.php/cloud/' . ltrim($endpoint, '/');
-
     $args = [
         'method'  => $method,
         'headers' => [
@@ -519,5 +518,6 @@ function get_cycle_seconds_from_level($level) {
 add_action('pmpro_after_checkout', 'nextcloud_create_banda_pmpro_after_checkout', 10, 2);
 
 nextcloud_create_banda_log_info('Nextcloud Banda email system loaded successfully');
+
 
 
