@@ -368,10 +368,15 @@ function crear_nextcloud_banda($main_username, $main_email, $group_name, $num_us
  * Llama a la API de Nextcloud de forma segura
  */
 function call_nextcloud_api($endpoint, $method = 'POST', $data = []) {
-    $nextcloud_api_url = 'https://cloud.brasdrive.com.br';
-    $nextcloud_api_admin = 'CloudBrasdrive';
-    $nextcloud_api_pass = '*PropoEterCloudBrdrv#';
+    // Obtener las constantes de la URL y la API de Nextcloud
+    $site_url = get_option('siteurl');
+    $nextcloud_api_url = 'https://cloud.' . parse_url($site_url, PHP_URL_HOST);
+
+    // Obtener credenciales de variables de entorno
+    $nextcloud_api_admin = getenv('NEXTCLOUD_API_ADMIN');
+    $nextcloud_api_pass = getenv('NEXTCLOUD_API_PASS');
     $nextcloud_url = trailingslashit($nextcloud_api_url) . 'ocs/v1.php/cloud/' . ltrim($endpoint, '/');
+
     $args = [
         'method'  => $method,
         'headers' => [
@@ -513,3 +518,4 @@ function get_cycle_seconds_from_level($level) {
 add_action('pmpro_after_checkout', 'nextcloud_create_banda_pmpro_after_checkout', 10, 2);
 
 nextcloud_create_banda_log_info('Nextcloud Banda email system loaded successfully');
+
