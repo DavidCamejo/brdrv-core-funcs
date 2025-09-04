@@ -360,6 +360,24 @@ function send_nextcloud_create_banda_admin_email($data) {
 }
 
 /**
+ * Convierte el valor de cuota a GB para la API de Nextcloud.
+ * Ejemplo: "1TB" => "1024GB", "0.75TB" => "768GB", "500GB" => "500GB"
+ */
+function convert_quota_to_gb($quota_str) {
+    $quota_str = strtoupper(trim($quota_str));
+    if (strpos($quota_str, 'TB') !== false) {
+        $tb_val = floatval(str_replace('TB', '', $quota_str));
+        $gb_val = intval($tb_val * 1024);
+        return $gb_val . 'GB';
+    } elseif (strpos($quota_str, 'GB') !== false) {
+        $gb_val = floatval(str_replace('GB', '', $quota_str));
+        return intval($gb_val) . 'GB';
+    }
+    // Fallback: si no hay unidad, asumir GB
+    return intval($quota_str) . 'GB';
+}
+
+/**
  * Mejoras en crear un grupo de Nextcloud y usuarios asociados (Agregados delays, logging, subadmin y ASIGNACIÓN DE CUOTAS DINÁMICAS con unidad TB/GB)
  */
 function crear_nextcloud_banda($main_username, $main_email, $group_name, $num_users = 2, $shared_password) {
@@ -417,8 +435,9 @@ function crear_nextcloud_banda($main_username, $main_email, $group_name, $num_us
     }
     usleep(400000);
 
-    // Asignar cuota al usuario principal (admin)
-    $quota_result = call_nextcloud_api("users/$main_username", 'PUT', ['quota' => $admin_quota]);
+    // Asignar cuota al usuario principal (admin) - SIEMPRE EN GB PARA LA API
+    $admin_quota_gb = convert_quota_to_gb($admin_quota);
+    $quota_result = call_nextcloud_api("users/$main_username", 'PUT', ['key' => 'quota', 'value' => $admin_quota_gb]);
     error_log("[Nextcloud Debug] Cuota asignada a admin: " . json_encode($quota_result));
     if ($quota_result['statuscode'] !== 100) {
         error_log("[Nextcloud Banda] WARNING: Failed to assign quota to admin | " . json_encode($quota_result));
@@ -449,7 +468,7 @@ function crear_nextcloud_banda($main_username, $main_email, $group_name, $num_us
     }
     usleep(400000);
 
-    // Crear usuarios adicionales con delay, logging y ASIGNACIÓN DE CUOTA DINÁMICA
+    // Crear usuarios adicionales con delay, logging y ASIGNACIÓN DE CUOTA DINÁMICA EN GB
     for ($i = 1; $i < $num_users; $i++) {
         $username = sanitize_user($main_username . "-$i");
         $user_data = [
@@ -464,8 +483,9 @@ function crear_nextcloud_banda($main_username, $main_email, $group_name, $num_us
         if ($result['statuscode'] !== 100) {
             error_log("[Nextcloud Banda] ERROR: Failed to create additional user | username=$username | " . json_encode($result));
         } else {
-            // Asignar cuota a cada usuario adicional
-            $quota_result = call_nextcloud_api("users/$username", 'PUT', ['quota' => $other_quota]);
+            // Asignar cuota a cada usuario adicional EN GB
+            $other_quota_gb = convert_quota_to_gb($other_quota);
+            $quota_result = call_nextcloud_api("users/$username", 'PUT', ['key' => 'quota', 'value' => $other_quota_gb]);
             error_log("[Nextcloud Debug] Cuota asignada a $username: " . json_encode($quota_result));
             if ($quota_result['statuscode'] !== 100) {
                 error_log("[Nextcloud Banda] WARNING: Failed to assign quota to user $username | " . json_encode($quota_result));
@@ -480,9 +500,11 @@ function crear_nextcloud_banda($main_username, $main_email, $group_name, $num_us
  * Función robusta y segura para llamar a la API de Nextcloud
  */
 function call_nextcloud_api($endpoint, $method = 'POST', $data = []) {
-    $nextcloud_api_url = 'https://cloud.brasdrive.com.br';
-    $nextcloud_api_admin = 'CloudBrasdrive';
-    $nextcloud_api_pass = '*PropoEterCloudBrdrv#';
+    // Obtener las constantes de la URL y la API de Nextcloud
+    $site_url = get_option('siteurl');
+    $nextcloud_api_url = 'https://cloud.' . parse_url($site_url, PHP_URL_HOST);
+    $nextcloud_api_admin = getenv('NEXTCLOUD_API_ADMIN');
+    $nextcloud_api_pass = getenv('NEXTCLOUD_API_PASS');
     $auth = "$nextcloud_api_admin:$nextcloud_api_pass";
     $nextcloud_url = trailingslashit($nextcloud_api_url) . 'ocs/v1.php/cloud/' . ltrim($endpoint, '/');
     $args = [
