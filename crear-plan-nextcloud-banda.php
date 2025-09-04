@@ -360,14 +360,48 @@ function send_nextcloud_create_banda_admin_email($data) {
 }
 
 /**
- * Crea un grupo de Nextcloud y usuarios asociados
+ * Mejoras en crear un grupo de Nextcloud y usuarios asociados (Agregados delays, logging, subadmin y ASIGNACIÓN DE CUOTAS DINÁMICAS con unidad TB/GB)
  */
 function crear_nextcloud_banda($main_username, $main_email, $group_name, $num_users = 2, $shared_password) {
+    // Obtener la configuración dinámica del usuario Banda
+    $user_id = 0;
+    if (preg_match('/banda-(\d+)/', $group_name, $m)) $user_id = intval($m[1]);
+    $config_data = get_nextcloud_create_banda_user_config($user_id);
+
+    // Analizar storage_space para valor y unidad (ej: "3tb", "500gb")
+    $storage_str = strtolower($config_data['storage_space'] ?? '1tb');
+    if (preg_match('/^(\d+)(tb|gb)$/', $storage_str, $matches)) {
+        $storage_value = (int)$matches[1];
+        $storage_unit = strtoupper($matches[2]); // 'TB' o 'GB'
+    } else {
+        // fallback: 1TB
+        $storage_value = 1;
+        $storage_unit = 'TB';
+    }
+    $total_storage_str = $storage_value . $storage_unit; // Ej: "3TB", "500GB"
+
+    // Calcular cuotas en la misma unidad que el plan
+    if ($num_users === 2) {
+        $admin_quota_value = floor($storage_value / 2);
+        $other_quota_value = ceil($storage_value / 2);
+    } else {
+        $admin_quota_value = floor($storage_value * 0.5);
+        $rest = $storage_value - $admin_quota_value;
+        $other_quota_value = ($num_users > 1 ? floor($rest / ($num_users - 1)) : $rest);
+    }
+    $admin_quota = $admin_quota_value . $storage_unit;
+    $other_quota = $other_quota_value . $storage_unit;
+
+    // Crear grupo
     $group_result = call_nextcloud_api('groups', 'POST', ['groupid' => $group_name]);
+    error_log("[Nextcloud Debug] Grupo creado: " . json_encode($group_result));
     if ($group_result['statuscode'] !== 100) {
         error_log("[Nextcloud Banda] ERROR: Failed to create group | " . json_encode($group_result));
         return false;
     }
+    usleep(400000);
+
+    // Crear usuario principal
     $user_data = [
         'userid'      => $main_username,
         'password'    => $shared_password,
@@ -376,14 +410,46 @@ function crear_nextcloud_banda($main_username, $main_email, $group_name, $num_us
         'email'       => $main_email
     ];
     $main_user_result = call_nextcloud_api('users', 'POST', $user_data);
+    error_log("[Nextcloud Debug] Usuario principal creado: " . json_encode($main_user_result));
     if ($main_user_result['statuscode'] !== 100) {
         error_log("[Nextcloud Banda] ERROR: Failed to create main user | " . json_encode($main_user_result));
         return false;
     }
-    $admin_result = call_nextcloud_api("groups/$group_name/admins", 'POST', ['userid' => $main_username]);
-    if ($admin_result['statuscode'] !== 100) {
-        error_log("[Nextcloud Banda] WARNING: Failed to set main user as group admin | " . json_encode($admin_result));
+    usleep(400000);
+
+    // Asignar cuota al usuario principal (admin)
+    $quota_result = call_nextcloud_api("users/$main_username", 'PUT', ['quota' => $admin_quota]);
+    error_log("[Nextcloud Debug] Cuota asignada a admin: " . json_encode($quota_result));
+    if ($quota_result['statuscode'] !== 100) {
+        error_log("[Nextcloud Banda] WARNING: Failed to assign quota to admin | " . json_encode($quota_result));
     }
+    usleep(400000);
+
+    // Verificar que el usuario principal está en el grupo antes de intentar asignar subadmin
+    $group_users = call_nextcloud_api("groups/$group_name", 'GET');
+    error_log("[Nextcloud Debug] Usuarios en grupo antes de asignar subadmin: " . json_encode($group_users));
+    $is_in_group = false;
+    if (!empty($group_users['data']['users'])) {
+        $users = $group_users['data']['users'];
+        if (is_array($users) && in_array($main_username, $users)) {
+            $is_in_group = true;
+        } elseif (is_array($users) && isset($users['element']) && $users['element'] == $main_username) {
+            $is_in_group = true;
+        }
+    }
+    if ($is_in_group) {
+        // Asignar subadmin al grupo
+        $subadmin_result = call_nextcloud_api("groups/$group_name/subadmins", 'POST', ['userid' => $main_username]);
+        error_log("[Nextcloud Debug] Set subadmin: " . json_encode($subadmin_result));
+        if ($subadmin_result['statuscode'] !== 100) {
+            error_log("[Nextcloud Banda] WARNING: Failed to set main user as group subadmin | " . json_encode($subadmin_result));
+        }
+    } else {
+        error_log("[Nextcloud Banda] WARNING: Main user not found in group before assigning as subadmin");
+    }
+    usleep(400000);
+
+    // Crear usuarios adicionales con delay, logging y ASIGNACIÓN DE CUOTA DINÁMICA
     for ($i = 1; $i < $num_users; $i++) {
         $username = sanitize_user($main_username . "-$i");
         $user_data = [
@@ -392,52 +458,72 @@ function crear_nextcloud_banda($main_username, $main_email, $group_name, $num_us
             'displayname' => $username,
             'groups[]'    => $group_name,
         ];
+        error_log("[Nextcloud Debug] Creando usuario adicional $username con data: " . json_encode($user_data));
         $result = call_nextcloud_api('users', 'POST', $user_data);
+        error_log("[Nextcloud Debug] Usuario adicional resultado para $username: " . json_encode($result));
         if ($result['statuscode'] !== 100) {
             error_log("[Nextcloud Banda] ERROR: Failed to create additional user | username=$username | " . json_encode($result));
+        } else {
+            // Asignar cuota a cada usuario adicional
+            $quota_result = call_nextcloud_api("users/$username", 'PUT', ['quota' => $other_quota]);
+            error_log("[Nextcloud Debug] Cuota asignada a $username: " . json_encode($quota_result));
+            if ($quota_result['statuscode'] !== 100) {
+                error_log("[Nextcloud Banda] WARNING: Failed to assign quota to user $username | " . json_encode($quota_result));
+            }
         }
+        usleep(400000);
     }
     return true;
 }
 
 /**
- * Llama a la API de Nextcloud de forma segura
+ * Función robusta y segura para llamar a la API de Nextcloud
  */
 function call_nextcloud_api($endpoint, $method = 'POST', $data = []) {
     $nextcloud_api_url = 'https://cloud.brasdrive.com.br';
     $nextcloud_api_admin = 'CloudBrasdrive';
     $nextcloud_api_pass = '*PropoEterCloudBrdrv#';
+    $auth = "$nextcloud_api_admin:$nextcloud_api_pass";
     $nextcloud_url = trailingslashit($nextcloud_api_url) . 'ocs/v1.php/cloud/' . ltrim($endpoint, '/');
     $args = [
-        'method'  => $method,
-        'headers' => [
+        'method'    => $method,
+        'headers'   => [
             'OCS-APIRequest' => 'true',
-            'Authorization' => 'Basic ' . base64_encode("$nextcloud_api_admin:$nextcloud_api_pass")
+            'Authorization'  => 'Basic ' . base64_encode($auth),
         ],
-        'body'    => http_build_query($data, '', '&'),
-        'timeout' => 30,
+        'sslverify' => true,
+        'timeout'   => 15,
     ];
+    if (!empty($data)) {
+        if ($method === 'POST' || $method === 'PUT') {
+            $args['body'] = $data;
+        } else {
+            $nextcloud_url = add_query_arg($data, $nextcloud_url);
+        }
+    }
+    error_log("[Nextcloud Debug] Solicitud API: $method $nextcloud_url | Data: " . json_encode($data));
     $response = wp_remote_request($nextcloud_url, $args);
     if (is_wp_error($response)) {
-        return [
-            'status'  => 'error',
-            'message' => $response->get_error_message(),
-        ];
+        error_log("[Nextcloud Debug] Error WP: " . $response->get_error_message() . " | URL: $nextcloud_url");
+        return ['status' => 'error', 'message' => $response->get_error_message()];
     }
+    $http_code = wp_remote_retrieve_response_code($response);
     $body = wp_remote_retrieve_body($response);
-    $xml  = simplexml_load_string($body);
-    if ($xml && isset($xml->meta->statuscode)) {
-        return [
-            'status'     => (string)$xml->meta->status,
-            'statuscode' => (int)$xml->meta->statuscode,
-            'message'    => (string)$xml->meta->message,
-        ];
+    if ($http_code != 200) {
+        error_log("[Nextcloud Debug] HTTP Error: $http_code | URL: $nextcloud_url | Response: $body");
+        return ['status' => 'error', 'http_code' => $http_code, 'message' => 'Error en la solicitud'];
     }
-    return [
-        'status'     => 'error',
-        'statuscode' => 999,
-        'message'    => 'Invalid response',
-    ];
+    $xml = simplexml_load_string($body);
+    if ($xml === false) {
+        error_log("[Nextcloud Debug] Error parsing XML | Response: $body | URL: $nextcloud_url");
+        return ['status' => 'error', 'message' => 'Error parsing XML'];
+    }
+    $status     = isset($xml->meta->status) ? (string)$xml->meta->status : 'unknown';
+    $statuscode = isset($xml->meta->statuscode) ? (int)$xml->meta->statuscode : 0;
+    $message    = isset($xml->meta->message) ? (string)$xml->meta->message : '';
+    $data_resp  = isset($xml->data) ? json_decode(json_encode($xml->data), true) : null;
+    error_log("[Nextcloud Debug] Respuesta API: endpoint=$endpoint | status=$status | statuscode=$statuscode | message=$message | data=" . json_encode($data_resp));
+    return ['status' => $status, 'statuscode' => $statuscode, 'message' => $message, 'data' => $data_resp];
 }
 
 /**
