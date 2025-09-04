@@ -195,6 +195,27 @@ function plan_nextcloud_banda($user_id, $morder, $num_users, $shared_password) {
     }
 }
 
+
+/**
+ * Prepara los datos para los emails Banda
+ */
+function prepare_nextcloud_create_banda_email_data($user, $level, $morder, $config_data, $additional_data) {
+    // Determinar mensajes basados en la frecuencia
+    $frequency_messages = get_frequency_messages($config_data['payment_frequency'] ?? 'monthly');
+    
+    return [
+        'user' => $user,
+        'level' => $level,
+        'morder' => $morder,
+        'config' => $config_data,
+        'fecha_pedido' => $additional_data['fecha_pedido'],
+        'fecha_pago_proximo' => $additional_data['fecha_pago_proximo'],
+        'grupo_info' => $additional_data['grupo_info'],
+        'monthly_message' => $frequency_messages['monthly_message'],
+        'date_message' => $frequency_messages['date_message']
+    ];
+}
+
 /**
  * Envía email al usuario para plan Banda, incluye reparto de cuotas
  */
@@ -208,7 +229,7 @@ function send_nextcloud_create_banda_user_email($data) {
     $brdrv_email = "cloud@" . basename(get_site_url());
     $mailto = "mailto:" . $brdrv_email;
 
-    $subject = "Seu grupo Nextcloud Banda foi criado";
+    $subject = "Seu plano Nextcloud Banda foi criado";
     $message = "<h1>Cloud Brasdrive</h1>";
     $message .= "<p>Prezado(a) <b>{$user->display_name}</b> ({$user->user_login}),</p>";
     $message .= "<p>Parabéns! Seu pagamento foi confirmado e seu plano Nextcloud Banda foi criado com sucesso.</p>";
@@ -254,6 +275,17 @@ function send_nextcloud_create_banda_user_email($data) {
     $message .= "<li>Configurar senhas individuais para cada usuário do grupo</li>";
     $message .= "</ul></div>";
 
+    $message .= "<div style='background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 15px; margin: 20px 0; border-radius: 5px;'>";
+    $message .= "<p><strong>⚠️ Segurança do Grupo:</strong><br/>";
+    $message .= "Por segurança, recomendamos:</p>";
+    $message .= "<ul>";
+    $message .= "<li>Compartilhar este e-mail apenas com usuários autorizados do grupo</li>";
+    $message .= "<li>Solicitar que cada usuário altere sua senha no primeiro acesso</li>";
+    $message .= "<li>Manter as credenciais do grupo em local seguro</li>";
+    $message .= "<li>Como admin, você pode monitorar o uso de armazenamento de cada usuário</li>";
+    $message .= "<li>Excluir este e-mail após distribuir as informações aos usuários</li>";
+    $message .= "</ul></div>";
+
     $message .= "<p>Se você tiver alguma dúvida sobre a gestão do grupo, entre em contato conosco no e-mail: <a href='{$mailto}'>{$brdrv_email}</a>.</p>";
     $message .= "<p>Atenciosamente,<br/><strong>Equipe Brasdrive</strong></p>";
 
@@ -281,7 +313,7 @@ function send_nextcloud_create_banda_admin_email($data) {
     $to = get_option('admin_email');
     $subject = "Novo grupo Nextcloud Banda criado - " . $level->name;
 
-    $admin_message = "<h2>Novo grupo Nextcloud Banda criado</h2>";
+    $admin_message = "<h2>Novo plano Nextcloud Banda criado</h2>";
     $admin_message .= "<p><strong>Plano:</strong> {$level->name}<br/>";
     $admin_message .= "<strong>Nome:</strong> {$user->display_name}<br/>";
     $admin_message .= "<strong>Usuário:</strong> {$user->user_login}<br/>";
@@ -368,14 +400,9 @@ function crear_nextcloud_banda($main_username, $main_email, $group_name, $num_us
  * Llama a la API de Nextcloud de forma segura
  */
 function call_nextcloud_api($endpoint, $method = 'POST', $data = []) {
-    // Obtener las constantes de la URL y la API de Nextcloud
-    $site_url = get_option('siteurl');
-    $nextcloud_api_url = 'https://cloud.' . parse_url($site_url, PHP_URL_HOST);
-
-    // Obtener credenciales de variables de entorno
-    $nextcloud_api_admin = getenv('NEXTCLOUD_API_ADMIN');
-    $nextcloud_api_pass = getenv('NEXTCLOUD_API_PASS');
-
+    $nextcloud_api_url = 'https://cloud.brasdrive.com.br';
+    $nextcloud_api_admin = 'CloudBrasdrive';
+    $nextcloud_api_pass = '*PropoEterCloudBrdrv#';
     $nextcloud_url = trailingslashit($nextcloud_api_url) . 'ocs/v1.php/cloud/' . ltrim($endpoint, '/');
     $args = [
         'method'  => $method,
@@ -518,6 +545,3 @@ function get_cycle_seconds_from_level($level) {
 add_action('pmpro_after_checkout', 'nextcloud_create_banda_pmpro_after_checkout', 10, 2);
 
 nextcloud_create_banda_log_info('Nextcloud Banda email system loaded successfully');
-
-
-
