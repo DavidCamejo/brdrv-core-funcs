@@ -42,7 +42,7 @@ function nextcloud_create_banda_pmpro_after_checkout($user_id, $invoice) {
 
     try {
         // Obtiene la cantidad de usuarios del formulario
-        $num_users = isset($_REQUEST['num_users']) ? intval($_REQUEST['num_users']) : 2;
+        $num_users = isset($config_data['num_users']) ? intval($config_data['num_users']) : (isset($_REQUEST['num_users']) ? intval($_REQUEST['num_users']) : 2);
 
         nextcloud_create_banda_log_info('Starting Banda plan processing', [
             'user_id' => $user_id,
@@ -136,6 +136,9 @@ function plan_nextcloud_banda($user_id, $morder, $num_users, $shared_password) {
 
         // Obtener configuración dinámica del usuario Banda
         $config_data = get_nextcloud_create_banda_user_config($user_id);
+
+        // Log justo antes de usar los datos en el correo
+        error_log('CONFIG DATA: ' . print_r($config_data, true));
 
         $storage_tb = (int)($config_data['storage_space'] ?? 1);
         $total_gb = $storage_tb * 1024;
@@ -265,16 +268,17 @@ function send_nextcloud_create_banda_user_email($data) {
     $message .= "</li>";
     $message .= "</div>";
 
+    // Información importante sobre contraseñas
     $message .= "<div style='background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; margin: 20px 0; border-radius: 5px;'>";
-    $message .= "<p><strong>⚠️ Importante - Segurança:</strong><br/>";
-    $message .= "Por segurança, recomendamos:</p>";
+    $message .= "<p><strong>🔐 Importante - Gestão de Senhas:</strong></p>";
     $message .= "<ul>";
-    $message .= "<li>Manter guardadas as credenciais do grupo em um local seguro</li>";
-    $message .= "<li>Excluir este e-mail após salvar as informações</li>";
-    $message .= "<li>Alterar a senha nas Configurações pessoais do Nextcloud</li>";
-    $message .= "<li>Configurar senhas individuais para cada usuário do grupo</li>";
+    $message .= "<li><strong>Senha inicial:</strong> Todos os usuários do grupo compartilham a mesma senha inicial</li>";
+    $message .= "<li><strong>Recomendação:</strong> Cada usuário deve alterar sua senha individualmente após o primeiro acesso</li>";
+    $message .= "<li><strong>Como alterar:</strong> Configurações pessoais → Segurança → Alterar senha</li>";
+    $message .= "<li><strong>Segurança:</strong> Como admin do grupo, você pode gerenciar os usuários e suas configurações</li>";
     $message .= "</ul></div>";
 
+    // Recomendações gerais de segurança
     $message .= "<div style='background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 15px; margin: 20px 0; border-radius: 5px;'>";
     $message .= "<p><strong>⚠️ Segurança do Grupo:</strong><br/>";
     $message .= "Por segurança, recomendamos:</p>";
@@ -311,7 +315,7 @@ function send_nextcloud_create_banda_admin_email($data) {
     $grupo_info = $data['grupo_info'];
 
     $to = get_option('admin_email');
-    $subject = "Novo grupo Nextcloud Banda criado - " . $level->name;
+    $subject = "Novo plano Nextcloud Banda criado";
 
     $admin_message = "<h2>Novo plano Nextcloud Banda criado</h2>";
     $admin_message .= "<p><strong>Plano:</strong> {$level->name}<br/>";
@@ -440,25 +444,25 @@ function call_nextcloud_api($endpoint, $method = 'POST', $data = []) {
  * Obtiene la configuración dinámica del usuario Banda
  */
 function get_nextcloud_create_banda_user_config($user_id) {
-    $config_json = get_user_meta($user_id, 'nextcloud_create_banda_config', true);
-    if (empty($config_json)) {
-        return [
-            'storage_space' => '1tb',
-            'num_users' => 2,
-            'payment_frequency' => 'monthly',
-            'storage_display' => '1 Terabyte',
-            'users_display' => '2 usuários (incluídos)',
-            'frequency_display' => 'Mensal'
-        ];
+    $config_json = get_user_meta($user_id, 'nextcloud_banda_config', true);
+    if (!empty($config_json)) {
+        $config = json_decode($config_json, true);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            $config['storage_display'] = get_storage_display_name($config['storage_space'] ?? '1tb');
+            $config['users_display'] = get_users_display_name($config['num_users'] ?? 2);
+            $config['frequency_display'] = get_frequency_display_name($config['payment_frequency'] ?? 'monthly');
+            return $config;
+        }
     }
-    $config = json_decode($config_json, true);
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        return null;
-    }
-    $config['storage_display'] = get_storage_display_name($config['storage_space'] ?? '1tb');
-    $config['users_display'] = get_users_display_name($config['num_users'] ?? 2);
-    $config['frequency_display'] = get_frequency_display_name($config['payment_frequency'] ?? 'monthly');
-    return $config;
+    // Solo usar valores por defecto si no hay config personalizada
+    return [
+        'storage_space' => '1tb',
+        'num_users' => 2,
+        'payment_frequency' => 'monthly',
+        'storage_display' => '1 Terabyte',
+        'users_display' => '2 usuários (incluídos)',
+        'frequency_display' => 'Mensal'
+    ];
 }
 
 /**
