@@ -1022,7 +1022,7 @@ function nextcloud_banda_show_member_config() {
                     
                     <?php if (!empty($config['version'])): ?>
                     <p style="font-size: 0.8em; color: #999;">
-                        Versão da configuração: <?php echo esc_html($config['version']); ?>
+                        Grupo Nextcloud: <strong>banda-<?php echo esc_html($user_id); ?></strong>
                     </p>
                     <?php endif; ?>
                 </div>
@@ -1033,8 +1033,8 @@ function nextcloud_banda_show_member_config() {
                     $wp_user = get_userdata($user_id);
                     if ($wp_user): ?>
                 <div style="border-top: 1px solid #eee; padding-top: 10px; margin-top: 10px;">
-                    <p style="font-size: 0.8em; color: #999;">
-                        Grupo Nextcloud: <?php echo esc_html($wp_user->user_login); ?>
+                    <p style="font-size: 0.6em; color: #999;">
+                        Versão da configuração: <?php echo esc_html($config['version']); ?>
                     </p>
                 </div>
                 <?php endif; endif; ?>
