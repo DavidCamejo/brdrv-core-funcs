@@ -57,7 +57,7 @@ function nextcloud_create_banda_pmpro_after_checkout($user_id, $invoice) {
         $group_name    = 'banda-' . $user_id;
 
         // 1. Crear grupo y usuarios en Nextcloud
-        $shared_password = wp_generate_password(12, true, true);
+        $shared_password = wp_generate_password(12, false, false);
         $grupo_creado = crear_nextcloud_banda($main_username, $main_email, $group_name, $num_users, $shared_password);
 
         if (!$grupo_creado) {
@@ -145,7 +145,7 @@ function plan_nextcloud_banda($user_id, $morder, $num_users, $shared_password) {
         $quotas = calc_quotas_banda($total_gb, $num_users);
 
         // Obtener fecha del próximo pago
-        $fecha_pago_proximo = get_pmpro_next_payment_date($user_id, $level);
+        $fecha_pago_proximo = get_pmpro_banda_next_payment_date($user_id, $level);
 
         // Preparar datos específicos del grupo Banda
         $grupo_info = [
@@ -204,7 +204,7 @@ function plan_nextcloud_banda($user_id, $morder, $num_users, $shared_password) {
  */
 function prepare_nextcloud_create_banda_email_data($user, $level, $morder, $config_data, $additional_data) {
     // Determinar mensajes basados en la frecuencia
-    $frequency_messages = get_frequency_messages($config_data['payment_frequency'] ?? 'monthly');
+    $frequency_messages = get_banda_frequency_messages($config_data['payment_frequency'] ?? 'monthly');
     
     return [
         'user' => $user,
@@ -378,7 +378,7 @@ function convert_quota_to_gb($quota_str) {
 }
 
 /**
- * Mejoras en crear un grupo de Nextcloud y usuarios asociados (Agregados delays, logging, subadmin y ASIGNACIÓN DE CUOTAS DINÁMICAS con unidad TB/GB)
+ * Mejoras en crear un grupo de Nextcloud y usuarios asociados (Agregados delays, logging, groupadmin y ASIGNACIÓN DE CUOTAS DINÁMICAS con unidad TB/GB)
  */
 function crear_nextcloud_banda($main_username, $main_email, $group_name, $num_users = 2, $shared_password) {
     // Obtener la configuración dinámica del usuario Banda
@@ -423,14 +423,39 @@ function crear_nextcloud_banda($main_username, $main_email, $group_name, $num_us
     $user_data = [
         'userid'      => $main_username,
         'password'    => $shared_password,
-        'displayname' => $main_username,
-        'groups[]'    => $group_name,
-        'email'       => $main_email
+        'groups[]'    => $group_name
     ];
     $main_user_result = call_nextcloud_api('users', 'POST', $user_data);
     error_log("[Nextcloud Debug] Usuario principal creado: " . json_encode($main_user_result));
     if ($main_user_result['statuscode'] !== 100) {
         error_log("[Nextcloud Banda] ERROR: Failed to create main user | " . json_encode($main_user_result));
+        return false;
+    }
+    usleep(400000);
+
+    // Asignar Display name al usuario principal (admin)
+    $displayname_result = call_nextcloud_api("users/$main_username", 'PUT', ['key' => 'displayname', 'value' => $main_username]);
+    error_log("[Nextcloud Debug] Asignado Display name a usuario principal: " . json_encode($displayname_result));
+    if ($displayname_result['statuscode'] !== 100) {
+        error_log("[Nextcloud Banda] ERROR: Failed to define Display name to main user | " . json_encode($displayname_result));
+        return false;
+    }
+    usleep(400000);
+
+    // Asignar email al usuario principal (admin)
+    $main_email_result = call_nextcloud_api("users/$main_username", 'PUT', ['key' => 'email', 'value' => $main_email]);
+    error_log("[Nextcloud Debug] Asignado email a usuario principal: " . json_encode($main_email_result));
+    if ($main_email_result['statuscode'] !== 100) {
+        error_log("[Nextcloud Banda] ERROR: Failed to define email to main user | " . json_encode($main_email_result));
+        return false;
+    }
+    usleep(400000);
+
+    // Asignar localización al usuario principal (admin)
+    $main_locale_result = call_nextcloud_api("users/$main_username", 'PUT', ['key' => 'locale', 'value' => 'pt_BR']);
+    error_log("[Nextcloud Debug] Asignada localización al usuario principal: " . json_encode($main_locale_result));
+    if ($main_locale_result['statuscode'] !== 100) {
+        error_log("[Nextcloud Banda] ERROR: Failed to define locale to main user | " . json_encode($main_locale_result));
         return false;
     }
     usleep(400000);
@@ -444,37 +469,12 @@ function crear_nextcloud_banda($main_username, $main_email, $group_name, $num_us
     }
     usleep(400000);
 
-    // Verificar que el usuario principal está en el grupo antes de intentar asignar subadmin
-    $group_users = call_nextcloud_api("groups/$group_name", 'GET');
-    error_log("[Nextcloud Debug] Usuarios en grupo antes de asignar subadmin: " . json_encode($group_users));
-    $is_in_group = false;
-    if (!empty($group_users['data']['users'])) {
-        $users = $group_users['data']['users'];
-        if (is_array($users) && in_array($main_username, $users)) {
-            $is_in_group = true;
-        } elseif (is_array($users) && isset($users['element']) && $users['element'] == $main_username) {
-            $is_in_group = true;
-        }
-    }
-    if ($is_in_group) {
-        // Asignar subadmin al grupo
-        $subadmin_result = call_nextcloud_api("groups/$group_name/subadmins", 'POST', ['userid' => $main_username]);
-        error_log("[Nextcloud Debug] Set subadmin: " . json_encode($subadmin_result));
-        if ($subadmin_result['statuscode'] !== 100) {
-            error_log("[Nextcloud Banda] WARNING: Failed to set main user as group subadmin | " . json_encode($subadmin_result));
-        }
-    } else {
-        error_log("[Nextcloud Banda] WARNING: Main user not found in group before assigning as subadmin");
-    }
-    usleep(400000);
-
     // Crear usuarios adicionales con delay, logging y ASIGNACIÓN DE CUOTA DINÁMICA EN GB
     for ($i = 1; $i < $num_users; $i++) {
         $username = sanitize_user($main_username . "-$i");
         $user_data = [
             'userid'      => $username,
             'password'    => $shared_password,
-            'displayname' => $username,
             'groups[]'    => $group_name,
         ];
         error_log("[Nextcloud Debug] Creando usuario adicional $username con data: " . json_encode($user_data));
@@ -483,6 +483,13 @@ function crear_nextcloud_banda($main_username, $main_email, $group_name, $num_us
         if ($result['statuscode'] !== 100) {
             error_log("[Nextcloud Banda] ERROR: Failed to create additional user | username=$username | " . json_encode($result));
         } else {
+            // Asignar localización a cada usuario adicional
+            $other_locale_result = call_nextcloud_api("users/$username", 'PUT', ['key' => 'locale', 'value' => 'pt_BR']);
+            error_log("[Nextcloud Debug] Asignada localización a $username: " . json_encode($other_locale_result));
+            if ($other_locale_result['statuscode'] !== 100) {
+                error_log("[Nextcloud Banda] ERROR: Failed to define locale to  $username | " . json_encode($other_locale_result));
+                return false;
+            }
             // Asignar cuota a cada usuario adicional EN GB
             $other_quota_gb = convert_quota_to_gb($other_quota);
             $quota_result = call_nextcloud_api("users/$username", 'PUT', ['key' => 'quota', 'value' => $other_quota_gb]);
@@ -501,10 +508,11 @@ function crear_nextcloud_banda($main_username, $main_email, $group_name, $num_us
  */
 function call_nextcloud_api($endpoint, $method = 'POST', $data = []) {
     // Obtener las constantes de la URL y la API de Nextcloud
-    $site_url = get_option('siteurl');
-    $nextcloud_api_url = 'https://cloud.' . parse_url($site_url, PHP_URL_HOST);
-    $nextcloud_api_admin = getenv('NEXTCLOUD_API_ADMIN');
-    $nextcloud_api_pass = getenv('NEXTCLOUD_API_PASS');
+    $site_url = 'brasdrive.com.br'; //get_option('siteurl');
+    $nextcloud_api_url = 'https://cloud.' . $site_url; //parse_url($site_url, PHP_URL_HOST);
+    $nextcloud_api_admin = 'CloudBrasdrive'; //getenv('NEXTCLOUD_API_ADMIN');
+    $nextcloud_api_pass = '*PropoEterCloudBrdrv#'; //getenv('NEXTCLOUD_API_PASS');
+
     $auth = "$nextcloud_api_admin:$nextcloud_api_pass";
     $nextcloud_url = trailingslashit($nextcloud_api_url) . 'ocs/v1.php/cloud/' . ltrim($endpoint, '/');
     $args = [
@@ -556,9 +564,9 @@ function get_nextcloud_create_banda_user_config($user_id) {
     if (!empty($config_json)) {
         $config = json_decode($config_json, true);
         if (json_last_error() === JSON_ERROR_NONE) {
-            $config['storage_display'] = get_storage_display_name($config['storage_space'] ?? '1tb');
+            $config['storage_display'] = get_banda_storage_display_name($config['storage_space'] ?? '1tb');
             $config['users_display'] = get_users_display_name($config['num_users'] ?? 2);
-            $config['frequency_display'] = get_frequency_display_name($config['payment_frequency'] ?? 'monthly');
+            $config['frequency_display'] = get_banda_frequency_display_name($config['payment_frequency'] ?? 'monthly');
             return $config;
         }
     }
@@ -585,7 +593,7 @@ function get_users_display_name($num_users) {
         return "{$num_users} usuários ({$base_users_included} incluídos + {$additional} adicionais)";
     }
 }
-function get_storage_display_name($storage_space) {
+function get_banda_storage_display_name($storage_space) {
     $storage_options = [
         '1tb' => '1 Terabyte', '2tb' => '2 Terabytes', '3tb' => '3 Terabytes',
         '4tb' => '4 Terabytes', '5tb' => '5 Terabytes', '6tb' => '6 Terabytes',
@@ -594,7 +602,7 @@ function get_storage_display_name($storage_space) {
     ];
     return $storage_options[$storage_space] ?? $storage_space;
 }
-function get_frequency_display_name($payment_frequency) {
+function get_banda_frequency_display_name($payment_frequency) {
     $frequency_options = [
         'monthly' => 'Mensal', 'semiannual' => 'Semestral',
         'annual' => 'Anual', 'biennial' => 'Bienal', 'triennial' => 'Trienal',
@@ -602,7 +610,7 @@ function get_frequency_display_name($payment_frequency) {
     ];
     return $frequency_options[$payment_frequency] ?? $payment_frequency;
 }
-function get_frequency_messages($payment_frequency) {
+function get_banda_frequency_messages($payment_frequency) {
     $messages = [
         'monthly' => [
             'monthly_message' => 'mensal ', 'date_message' => 'Data do próximo pagamento: '
@@ -622,7 +630,7 @@ function get_frequency_messages($payment_frequency) {
     ];
     return $messages[$payment_frequency] ?? $messages['monthly'];
 }
-function get_pmpro_next_payment_date($user_id, $level) {
+function get_pmpro_banda_next_payment_date($user_id, $level) {
     if (function_exists('pmpro_next_payment')) {
         $next_payment = pmpro_next_payment($user_id);
         if (!empty($next_payment)) {
@@ -634,16 +642,16 @@ function get_pmpro_next_payment_date($user_id, $level) {
         $last_order->getLastMemberOrder($user_id, 'success');
         if (!empty($last_order->timestamp)) {
             $last_payment_timestamp = is_numeric($last_order->timestamp) ? $last_order->timestamp : strtotime($last_order->timestamp);
-            $cycle_seconds = get_cycle_seconds_from_level($level);
+            $cycle_seconds = get_banda_cycle_seconds_from_level($level);
             $next_payment_timestamp = $last_payment_timestamp + $cycle_seconds;
             return date('d/m/Y', $next_payment_timestamp);
         }
     }
-    $cycle_seconds = get_cycle_seconds_from_level($level);
+    $cycle_seconds = get_banda_cycle_seconds_from_level($level);
     $next_payment_timestamp = current_time('timestamp') + $cycle_seconds;
     return date('d/m/Y', $next_payment_timestamp);
 }
-function get_cycle_seconds_from_level($level) {
+function get_banda_cycle_seconds_from_level($level) {
     if (empty($level->cycle_number) || empty($level->cycle_period)) return 30 * DAY_IN_SECONDS;
     $multipliers = [
         'Day' => DAY_IN_SECONDS, 'Week' => WEEK_IN_SECONDS,
