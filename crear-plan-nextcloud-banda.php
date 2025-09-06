@@ -95,6 +95,12 @@ function calc_quotas_banda($total_gb, $num_users) {
 
 /**
  * Procesar plan Nextcloud Banda - Versión con emails mejorada y reparto de cuotas
+ * 
+ * @param int $user_id ID del usuario
+ * @param object $morder Objeto de orden de membresía
+ * @param int $num_users Número de usuarios a crear
+ * @param string $shared_password Contraseña compartida para los usuarios
+ * @return bool True si se procesó correctamente, false en caso de error
  */
 function plan_nextcloud_banda($user_id, $morder, $num_users, $shared_password) {
     // Validaciones iniciales
@@ -107,97 +113,257 @@ function plan_nextcloud_banda($user_id, $morder, $num_users, $shared_password) {
     }
 
     try {
-        // Obtener información del usuario con validaciones
+        // Obtener y validar información del usuario
         $user = get_userdata($user_id);
         if (!$user) {
             nextcloud_create_banda_log_error('User not found', ['user_id' => $user_id]);
             return false;
         }
 
-        $email = $user->user_email;
-        $username = $user->user_login;
-        $displayname = $user->display_name ?: $username;
-
-        // Obtener nivel de membresía actual
+        // Obtener y validar nivel de membresía
         $level = pmpro_getMembershipLevelForUser($user_id);
         if (!$level) {
             nextcloud_create_banda_log_error('No membership level found for user', ['user_id' => $user_id]);
             return false;
         }
 
-        // Configurar timezone y fecha del pedido
-        $dt = new DateTime();
-        $dt->setTimezone(new DateTimeZone('America/Boa_Vista'));
-        
-        // Usar timestamp del morder o timestamp actual
-        $order_timestamp = !empty($morder->timestamp) ? $morder->timestamp : current_time('timestamp');
-        $dt->setTimestamp($order_timestamp);
-        $fecha_pedido = $dt->format('d/m/Y H:i:s');
-
-        // Obtener configuración dinámica del usuario Banda
-        $config_data = get_nextcloud_create_banda_user_config($user_id);
-
-        // Log justo antes de usar los datos en el correo
-        error_log('CONFIG DATA: ' . print_r($config_data, true));
-
-        $storage_tb = (int)($config_data['storage_space'] ?? 1);
-        $total_gb = $storage_tb * 1024;
-        $quotas = calc_quotas_banda($total_gb, $num_users);
-
-        // Obtener fecha del próximo pago
-        $fecha_pago_proximo = get_pmpro_banda_next_payment_date($user_id, $level);
-
-        // Preparar datos específicos del grupo Banda
-        $grupo_info = [
-            'group_name' => 'banda-' . $user_id,
-            'num_users' => $num_users,
-            'admin_user' => $username,
-            'password' => $shared_password,
-            'quota_admin_gb' => $quotas['admin'],
-            'quota_user_gb' => $quotas['others_each'],
-            'total_gb' => $total_gb
+        // Preparar datos básicos
+        $user_info = [
+            'email' => $user->user_email,
+            'username' => $user->user_login,
+            'displayname' => $user->display_name ?: $user->user_login
         ];
 
-        // Preparar datos del email
-        $email_data = prepare_nextcloud_create_banda_email_data($user, $level, $morder, $config_data, [
-            'fecha_pedido' => $fecha_pedido,
-            'fecha_pago_proximo' => $fecha_pago_proximo,
-            'grupo_info' => $grupo_info
-        ]);
+        // Procesar configuración y cuotas
+        $config_data = get_nextcloud_create_banda_user_config($user_id);
+        $storage_config = process_storage_configuration($config_data);
+        $quotas = calculate_user_quotas($storage_config['total_gb'], $num_users);
 
-        // Enviar email al usuario
-        $user_email_sent = send_nextcloud_create_banda_user_email($email_data);
-        
-        // Enviar email al administrador
-        $admin_email_sent = send_nextcloud_create_banda_admin_email($email_data);
+        // --- INICIO: CÁLCULO Y ALMACENAMIENTO DEL PRORRATEO ---
+        $prorated_amount = 0.0;
+        $prorated_days_remaining = 0;
+        $prorated_cycle_days = 0;
 
-        // Log del resultado
-        nextcloud_create_banda_log_info('Nextcloud Banda plan processing completed', [
-            'user_id' => $user_id,
-            'username' => $username,
-            'group_name' => $grupo_info['group_name'],
-            'num_users' => $num_users,
-            'level_name' => $level->name,
-            'user_email_sent' => $user_email_sent,
-            'admin_email_sent' => $admin_email_sent,
-            'config_data' => $config_data,
-            'quota_admin_gb' => $quotas['admin'],
-            'quota_user_gb' => $quotas['others_each']
-        ]);
+        // Obtener configuración previa (si existe) para detectar upgrades
+        $current_config_json = get_user_meta($user_id, 'nextcloud_banda_config', true);
+        $current_config = $current_config_json ? json_decode($current_config_json, true) : null;
+
+        if ($current_config && !empty($current_config['storage_space'])) {
+            // Parsing robusto para la config previa (mismo formato que arriba)
+            $cur_storage_str = strtolower($current_config['storage_space']);
+            $cur_total_gb = 1024;
+            if (preg_match('/^([\d\.]+)\s*tb$/i', $cur_storage_str, $mcur)) {
+                $cur_total_gb = intval(round(floatval($mcur[1]) * 1024));
+            } elseif (preg_match('/^([\d\.]+)\s*gb$/i', $cur_storage_str, $mcur)) {
+                $cur_total_gb = intval(round(floatval($mcur[1])));
+            } elseif (preg_match('/^(\d+)\s*$/', $cur_storage_str, $mcur)) {
+                $cur_total_gb = intval($mcur[1]) * 1024;
+            }
+
+            // Comparar y aplicar prorrateo solo si hay upgrade de storage (nuevo > actual)
+            if ($storage_config['total_gb'] > $cur_total_gb) {
+                // Diferencia en TB (usar valor en TB para precio por TB)
+                $tb_diff = ($storage_config['total_gb'] - $cur_total_gb) / 1024.0;
+
+                // ✅ CORRECCIÓN: Usar mismo precio que dynamic pricing (70.00)
+                $config_data = nextcloud_banda_get_config();
+                $price_per_tb = $config_data['price_per_tb'] ?? 70.00;
+                $price_per_tb = floatval($price_per_tb);
+
+                // Precio total extra (completo)
+                $full_price_diff = $tb_diff * $price_per_tb;
+
+                // Determinar días restantes en el ciclo usando MemberOrder o cálculo por level
+                $days_remaining = 0;
+                $cycle_days = 0;
+                if (class_exists('MemberOrder')) {
+                    $last_order = new MemberOrder();
+                    $last_order->getLastMemberOrder($user_id, 'success');
+                    if (!empty($last_order->timestamp)) {
+                        $last_payment_ts = is_numeric($last_order->timestamp) ? intval($last_order->timestamp) : strtotime($last_order->timestamp);
+                        $cycle_seconds = get_banda_cycle_seconds_from_level($level);
+                        $next_payment_ts = $last_payment_ts + intval($cycle_seconds);
+                        $now_ts = current_time('timestamp');
+                        $days_remaining = max(0, ceil(($next_payment_ts - $now_ts) / DAY_IN_SECONDS));
+                        $cycle_days = max(1, ceil($cycle_seconds / DAY_IN_SECONDS));
+                    }
+                }
+
+                // Si no pudimos obtener last_order o días, como fallback intentar calcular ciclo desde level actual
+                if ($cycle_days === 0) {
+                    $cycle_seconds = get_banda_cycle_seconds_from_level($level);
+                    $cycle_days = max(1, ceil($cycle_seconds / DAY_IN_SECONDS));
+                    // si no hay last payment, asumimos cobro completo el primer día (no prorratear)
+                    $days_remaining = 0;
+                }
+
+                if ($days_remaining > 0 && $full_price_diff > 0) {
+                    $prorated_amount = round(($full_price_diff / $cycle_days) * $days_remaining, 2);
+                    $prorated_days_remaining = intval($days_remaining);
+                    $prorated_cycle_days = intval($cycle_days);
+
+                    // Guardar para trazabilidad en user_meta
+                    update_user_meta($user_id, 'nextcloud_banda_prorated_amount', $prorated_amount);
+                    update_user_meta($user_id, 'nextcloud_banda_prorated_days_remaining', $prorated_days_remaining);
+                    update_user_meta($user_id, 'nextcloud_banda_prorated_cycle_days', $prorated_cycle_days);
+
+                    nextcloud_create_banda_log_info('Prorated charge calculated', [
+                        'user_id' => $user_id,
+                        'cur_total_gb' => $cur_total_gb,
+                        'new_total_gb' => $storage_config['total_gb'],
+                        'tb_diff' => $tb_diff,
+                        'full_price_diff' => $full_price_diff,
+                        'prorated_amount' => $prorated_amount,
+                        'days_remaining' => $prorated_days_remaining,
+                        'cycle_days' => $prorated_cycle_days
+                    ]);
+                }
+            }
+        }
+        // --- FIN: CÁLCULO Y ALMACENAMIENTO DEL PRORRATEO ---
+
+        // Preparar fechas
+        $fechas = prepare_dates($morder, $user_id, $level);
+
+        // Preparar información del grupo (incluyendo prorrateo)
+        $grupo_info = prepare_group_info($user_id, $user_info['username'], $num_users, $shared_password, $quotas, $storage_config['total_gb']);
+        $grupo_info['prorated_amount'] = $prorated_amount;
+        $grupo_info['prorated_days_remaining'] = $prorated_days_remaining;
+        $grupo_info['prorated_cycle_days'] = $prorated_cycle_days;
+
+        // Preparar y enviar emails
+        $email_results = send_emails($user, $level, $morder, $config_data, $fechas, $grupo_info);
+
+        // Registrar resultado final
+        log_processing_result($user_id, $user_info, $grupo_info, $level, $email_results, $config_data, $quotas);
 
         return true;
 
     } catch (Exception $e) {
-        nextcloud_create_banda_log_error('Exception in plan_nextcloud_banda', [
-            'user_id' => $user_id,
-            'message' => $e->getMessage(),
-            'file' => $e->getFile(),
-            'line' => $e->getLine()
-        ]);
+        handle_exception($e, $user_id);
         return false;
     }
 }
 
+// ================= FUNCIONES AUXILIARES =================
+
+/**
+ * Procesa la configuración de almacenamiento
+ */
+function process_storage_configuration($config_data) {
+    $storage_str = strtolower($config_data['storage_space'] ?? '1tb');
+    $total_gb = 1024; // default 1TB
+
+    if (preg_match('/^([\d\.]+)\s*tb$/i', $storage_str, $m)) {
+        $total_gb = intval(round(floatval($m[1]) * 1024));
+    } elseif (preg_match('/^([\d\.]+)\s*gb$/i', $storage_str, $m)) {
+        $total_gb = intval(round(floatval($m[1])));
+    } elseif (preg_match('/^(\d+)\s*$/', $storage_str, $m)) {
+        $total_gb = intval($m[1]) * 1024;
+    }
+
+    error_log('CONFIG DATA: ' . print_r($config_data, true));
+    
+    return [
+        'storage_str' => $storage_str,
+        'total_gb' => $total_gb
+    ];
+}
+
+/**
+ * Calcula las cuotas de usuarios
+ */
+function calculate_user_quotas($total_gb, $num_users) {
+    $quotas = calc_quotas_banda($total_gb, $num_users);
+    
+    return [
+        'admin' => intval($quotas['admin']),
+        'others_each' => intval($quotas['others_each'])
+    ];
+}
+
+/**
+ * Prepara las fechas relevantes
+ */
+function prepare_dates($morder, $user_id, $level) {
+    $dt = new DateTime();
+    $dt->setTimezone(new DateTimeZone('America/Boa_Vista'));
+    
+    $order_timestamp = !empty($morder->timestamp) ? $morder->timestamp : current_time('timestamp');
+    $dt->setTimestamp($order_timestamp);
+    
+    return [
+        'fecha_pedido' => $dt->format('d/m/Y H:i:s'),
+        'fecha_pago_proximo' => get_pmpro_banda_next_payment_date($user_id, $level)
+    ];
+}
+
+/**
+ * Prepara la información del grupo
+ */
+function prepare_group_info($user_id, $username, $num_users, $shared_password, $quotas, $total_gb) {
+    return [
+        'group_name' => 'banda-' . $user_id,
+        'num_users' => $num_users,
+        'admin_user' => $username,
+        'password' => $shared_password,
+        'quota_admin_gb' => $quotas['admin'],
+        'quota_user_gb' => $quotas['others_each'],
+        'total_gb' => $total_gb
+    ];
+}
+
+/**
+ * Prepara y envía los emails
+ */
+function send_emails($user, $level, $morder, $config_data, $fechas, $grupo_info) {
+    $email_data = prepare_nextcloud_create_banda_email_data(
+        $user, 
+        $level, 
+        $morder, 
+        $config_data, 
+        [
+            'fecha_pedido' => $fechas['fecha_pedido'],
+            'fecha_pago_proximo' => $fechas['fecha_pago_proximo'],
+            'grupo_info' => $grupo_info
+        ]
+    );
+
+    return [
+        'user_email_sent' => send_nextcloud_create_banda_user_email($email_data),
+        'admin_email_sent' => send_nextcloud_create_banda_admin_email($email_data)
+    ];
+}
+
+/**
+ * Registra el resultado del procesamiento
+ */
+function log_processing_result($user_id, $user_info, $grupo_info, $level, $email_results, $config_data, $quotas) {
+    nextcloud_create_banda_log_info('Nextcloud Banda plan processing completed', [
+        'user_id' => $user_id,
+        'username' => $user_info['username'],
+        'group_name' => $grupo_info['group_name'],
+        'num_users' => $grupo_info['num_users'],
+        'level_name' => $level->name,
+        'user_email_sent' => $email_results['user_email_sent'],
+        'admin_email_sent' => $email_results['admin_email_sent'],
+        'config_data' => $config_data,
+        'quota_admin_gb' => $quotas['admin'],
+        'quota_user_gb' => $quotas['others_each']
+    ]);
+}
+
+/**
+ * Maneja excepciones
+ */
+function handle_exception($e, $user_id) {
+    nextcloud_create_banda_log_error('Exception in plan_nextcloud_banda', [
+        'user_id' => $user_id,
+        'message' => $e->getMessage(),
+        'file' => $e->getFile(),
+        'line' => $e->getLine()
+    ]);
+}
 
 /**
  * Prepara los datos para los emails Banda
@@ -251,6 +417,14 @@ function send_nextcloud_create_banda_user_email($data) {
     $message .= "<strong>Valor {$data['monthly_message']}:</strong> R$ " . number_format($morder->total, 2, ',', '.') . "<br/>";
     $message .= "{$data['date_message']}{$data['fecha_pago_proximo']}</p>";
 
+    // Mostrar prorrateo si existe
+    if (!empty($grupo_info['prorated_amount']) && floatval($grupo_info['prorated_amount']) > 0) {
+        $message .= "<div style='background:#fff8e1;border:1px solid #ffecb3;padding:12px;margin:18px 0;border-radius:6px;'>";
+        $message .= "<p><strong>⚖️ Valor prorrateado cobrado hoje:</strong> R$ " . number_format($grupo_info['prorated_amount'], 2, ',', '.') . "</p>";
+        $message .= "<p>Esse valor corresponde a um ajuste pelo aumento de armazenamento contratado. Restam <strong>{$grupo_info['prorated_days_remaining']}</strong> dias do ciclo (de um total de {$grupo_info['prorated_cycle_days']} dias).</p>";
+        $message .= "</div>";
+    }
+
     // Información específica del grupo y reparto de cuotas
     $message .= "<div style='background-color: #e3f2fd; border: 1px solid #2196f3; padding: 15px; margin: 20px 0; border-radius: 5px;'>";
     $message .= "<p><strong>📋 Distribuição de armazenamento:</strong></p><ul>";
@@ -268,7 +442,7 @@ function send_nextcloud_create_banda_user_email($data) {
     $message .= "</li>";
     $message .= "</div>";
 
-    // Información importante sobre contraseñas
+    // ... resto del código del email (mantener todo lo que sigue igual) ...
     $message .= "<div style='background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; margin: 20px 0; border-radius: 5px;'>";
     $message .= "<p><strong>🔐 Importante - Gestão de Senhas:</strong></p>";
     $message .= "<ul>";
@@ -383,37 +557,45 @@ function convert_quota_to_gb($quota_str) {
 function crear_nextcloud_banda($main_username, $main_email, $group_name, $num_users = 2, $shared_password) {
     // Obtener la configuración dinámica del usuario Banda
     $user_id = 0;
-    if (preg_match('/banda-(\d+)/', $group_name, $m)) $user_id = intval($m[1]);
+    if (preg_match('/banda-(\d+)/', $group_name, $m)) {
+        $user_id = intval($m[1]);
+    }
     $config_data = get_nextcloud_create_banda_user_config($user_id);
 
-    // Analizar storage_space para valor y unidad (ej: "3tb", "500gb")
+    // ---------- INICIO: Parsing robusto del storage y cálculo de cuotas en GB ----------
     $storage_str = strtolower($config_data['storage_space'] ?? '1tb');
-    if (preg_match('/^(\d+)(tb|gb)$/', $storage_str, $matches)) {
-        $storage_value = (int)$matches[1];
-        $storage_unit = strtoupper($matches[2]); // 'TB' o 'GB'
-    } else {
-        // fallback: 1TB
-        $storage_value = 1;
-        $storage_unit = 'TB';
-    }
-    $total_storage_str = $storage_value . $storage_unit; // Ej: "3TB", "500GB"
+    $total_gb = 1024; // default 1TB
 
-    // Calcular cuotas en la misma unidad que el plan
-    if ($num_users === 2) {
-        $admin_quota_value = floor($storage_value / 2);
-        $other_quota_value = ceil($storage_value / 2);
-    } else {
-        $admin_quota_value = floor($storage_value * 0.5);
-        $rest = $storage_value - $admin_quota_value;
-        $other_quota_value = ($num_users > 1 ? floor($rest / ($num_users - 1)) : $rest);
+    // Manejar TB (incluye decimales) y GB
+    if (preg_match('/^([\d\.]+)\s*tb$/i', $storage_str, $m)) {
+        $total_gb = intval(round(floatval($m[1]) * 1024));
+    } elseif (preg_match('/^([\d\.]+)\s*gb$/i', $storage_str, $m)) {
+        $total_gb = intval(round(floatval($m[1])));
+    } elseif (preg_match('/^(\d+)\s*$/', $storage_str, $m)) {
+        // si vienen solo números, asumir TB
+        $total_gb = intval($m[1]) * 1024;
     }
-    $admin_quota = $admin_quota_value . $storage_unit;
-    $other_quota = $other_quota_value . $storage_unit;
+
+    // Obtener cuotas en GB usando la función centralizada (enteros)
+    $quotas = calc_quotas_banda($total_gb, $num_users);
+    $admin_quota_gb = intval($quotas['admin']) . 'GB';
+    $other_quota_gb = intval($quotas['others_each']) . 'GB';
+    // ---------- FIN: Parsing y cuotas ----------
+
+    // Log para depuración
+    nextcloud_create_banda_log_info('Calculated quotas', [
+        'user_id' => $user_id,
+        'storage_str' => $storage_str,
+        'total_gb' => $total_gb,
+        'num_users' => $num_users,
+        'admin_quota_gb' => $admin_quota_gb,
+        'other_quota_gb' => $other_quota_gb
+    ]);
 
     // Crear grupo
     $group_result = call_nextcloud_api('groups', 'POST', ['groupid' => $group_name]);
     error_log("[Nextcloud Debug] Grupo creado: " . json_encode($group_result));
-    if ($group_result['statuscode'] !== 100) {
+    if (!isset($group_result['statuscode']) || $group_result['statuscode'] !== 100) {
         error_log("[Nextcloud Banda] ERROR: Failed to create group | " . json_encode($group_result));
         return false;
     }
@@ -421,85 +603,91 @@ function crear_nextcloud_banda($main_username, $main_email, $group_name, $num_us
 
     // Crear usuario principal
     $user_data = [
-        'userid'      => $main_username,
-        'password'    => $shared_password,
-        'groups[]'    => $group_name
+        'userid'   => $main_username,
+        'password' => $shared_password,
+        'groups[]' => $group_name
     ];
+
     $main_user_result = call_nextcloud_api('users', 'POST', $user_data);
     error_log("[Nextcloud Debug] Usuario principal creado: " . json_encode($main_user_result));
-    if ($main_user_result['statuscode'] !== 100) {
+    if (!isset($main_user_result['statuscode']) || $main_user_result['statuscode'] !== 100) {
         error_log("[Nextcloud Banda] ERROR: Failed to create main user | " . json_encode($main_user_result));
         return false;
     }
     usleep(400000);
 
-    // Asignar Display name al usuario principal (admin)
-    $displayname_result = call_nextcloud_api("users/$main_username", 'PUT', ['key' => 'displayname', 'value' => $main_username]);
-    error_log("[Nextcloud Debug] Asignado Display name a usuario principal: " . json_encode($displayname_result));
-    if ($displayname_result['statuscode'] !== 100) {
-        error_log("[Nextcloud Banda] ERROR: Failed to define Display name to main user | " . json_encode($displayname_result));
-        return false;
-    }
-    usleep(400000);
+    // Configurar propiedades del usuario principal
+    $main_user_configs = [
+        'displayname' => ['value' => $main_username, 'debug' => 'Display name'],
+        'email'       => ['value' => $main_email, 'debug' => 'email'],
+        'locale'      => ['value' => 'pt_BR', 'debug' => 'locale'],
+        'quota'       => ['value' => $admin_quota_gb, 'debug' => 'quota']
+    ];
 
-    // Asignar email al usuario principal (admin)
-    $main_email_result = call_nextcloud_api("users/$main_username", 'PUT', ['key' => 'email', 'value' => $main_email]);
-    error_log("[Nextcloud Debug] Asignado email a usuario principal: " . json_encode($main_email_result));
-    if ($main_email_result['statuscode'] !== 100) {
-        error_log("[Nextcloud Banda] ERROR: Failed to define email to main user | " . json_encode($main_email_result));
-        return false;
+    foreach ($main_user_configs as $key => $config) {
+        $result = call_nextcloud_api("users/$main_username", 'PUT', [
+            'key' => $key,
+            'value' => $config['value']
+        ]);
+        
+        error_log("[Nextcloud Debug] Asignado {$config['debug']} a usuario principal: " . json_encode($result));
+        
+        if (!isset($result['statuscode']) || $result['statuscode'] !== 100) {
+            $error_type = ($key === 'quota') ? 'WARNING' : 'ERROR';
+            error_log("[Nextcloud Banda] $error_type: Failed to define {$config['debug']} to main user | " . json_encode($result));
+            
+            if ($error_type === 'ERROR') {
+                return false;
+            }
+        }
+        usleep(400000);
     }
-    usleep(400000);
-
-    // Asignar localización al usuario principal (admin)
-    $main_locale_result = call_nextcloud_api("users/$main_username", 'PUT', ['key' => 'locale', 'value' => 'pt_BR']);
-    error_log("[Nextcloud Debug] Asignada localización al usuario principal: " . json_encode($main_locale_result));
-    if ($main_locale_result['statuscode'] !== 100) {
-        error_log("[Nextcloud Banda] ERROR: Failed to define locale to main user | " . json_encode($main_locale_result));
-        return false;
-    }
-    usleep(400000);
-
-    // Asignar cuota al usuario principal (admin) - SIEMPRE EN GB PARA LA API
-    $admin_quota_gb = convert_quota_to_gb($admin_quota);
-    $quota_result = call_nextcloud_api("users/$main_username", 'PUT', ['key' => 'quota', 'value' => $admin_quota_gb]);
-    error_log("[Nextcloud Debug] Cuota asignada a admin: " . json_encode($quota_result));
-    if ($quota_result['statuscode'] !== 100) {
-        error_log("[Nextcloud Banda] WARNING: Failed to assign quota to admin | " . json_encode($quota_result));
-    }
-    usleep(400000);
 
     // Crear usuarios adicionales con delay, logging y ASIGNACIÓN DE CUOTA DINÁMICA EN GB
     for ($i = 1; $i < $num_users; $i++) {
         $username = sanitize_user($main_username . "-$i");
         $user_data = [
-            'userid'      => $username,
-            'password'    => $shared_password,
-            'groups[]'    => $group_name,
+            'userid' => $username,
+            'password' => $shared_password,
+            'groups[]' => $group_name,
         ];
+        
         error_log("[Nextcloud Debug] Creando usuario adicional $username con data: " . json_encode($user_data));
+        
         $result = call_nextcloud_api('users', 'POST', $user_data);
         error_log("[Nextcloud Debug] Usuario adicional resultado para $username: " . json_encode($result));
-        if ($result['statuscode'] !== 100) {
+        
+        if (!isset($result['statuscode']) || $result['statuscode'] !== 100) {
             error_log("[Nextcloud Banda] ERROR: Failed to create additional user | username=$username | " . json_encode($result));
-        } else {
-            // Asignar localización a cada usuario adicional
-            $other_locale_result = call_nextcloud_api("users/$username", 'PUT', ['key' => 'locale', 'value' => 'pt_BR']);
-            error_log("[Nextcloud Debug] Asignada localización a $username: " . json_encode($other_locale_result));
-            if ($other_locale_result['statuscode'] !== 100) {
-                error_log("[Nextcloud Banda] ERROR: Failed to define locale to  $username | " . json_encode($other_locale_result));
-                return false;
-            }
-            // Asignar cuota a cada usuario adicional EN GB
-            $other_quota_gb = convert_quota_to_gb($other_quota);
-            $quota_result = call_nextcloud_api("users/$username", 'PUT', ['key' => 'quota', 'value' => $other_quota_gb]);
-            error_log("[Nextcloud Debug] Cuota asignada a $username: " . json_encode($quota_result));
-            if ($quota_result['statuscode'] !== 100) {
-                error_log("[Nextcloud Banda] WARNING: Failed to assign quota to user $username | " . json_encode($quota_result));
-            }
+            continue; // Continuar con el siguiente usuario en lugar de retornar false
         }
-        usleep(400000);
+
+        // Configurar propiedades de usuarios adicionales
+        $additional_user_configs = [
+            'locale' => ['value' => 'pt_BR', 'debug' => 'locale'],
+            'quota'  => ['value' => $other_quota_gb, 'debug' => 'quota']
+        ];
+
+        foreach ($additional_user_configs as $key => $config) {
+            $config_result = call_nextcloud_api("users/$username", 'PUT', [
+                'key' => $key,
+                'value' => $config['value']
+            ]);
+            
+            error_log("[Nextcloud Debug] Asignado {$config['debug']} a $username: " . json_encode($config_result));
+            
+            if (!isset($config_result['statuscode']) || $config_result['statuscode'] !== 100) {
+                $error_type = ($key === 'quota') ? 'WARNING' : 'ERROR';
+                error_log("[Nextcloud Banda] $error_type: Failed to define {$config['debug']} to $username | " . json_encode($config_result));
+                
+                if ($error_type === 'ERROR') {
+                    return false;
+                }
+            }
+            usleep(400000);
+        }
     }
+
     return true;
 }
 

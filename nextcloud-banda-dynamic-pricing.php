@@ -27,7 +27,7 @@ function nextcloud_banda_get_config($key = null) {
     
     if ($config === null) {
         $config = [
-            'allowed_levels' => [2], // ID del nivel Nextcloud Banda
+            'allowed_levels' => [15], // ID del nivel Nextcloud Banda
             'price_per_tb' => 70.00, // Precio por TB adicional
             'price_per_additional_user' => 10.00, // Precio por usuario adicional (a partir del 3er usuario)
             'base_users_included' => 2, // Usuarios incluidos en precio base
