@@ -822,3 +822,88 @@ select#payment_frequency {
         transition: none !important;
     }
 }
+
+/* ====================================================================
+   ESTILOS PARA PRORRATEO (UPGRADES)
+   ==================================================================== */
+
+/* Estado de prorrateo en el campo de precio */
+#total_price_display.prorated-price {
+    background-color: #fff8e1 !important;
+    border: 2px solid #ffd54f !important;
+    color: #8c6b08 !important;
+    font-weight: 700 !important;
+}
+
+/* Label para precio prorrateado */
+.pmpro_checkout-field-price-display.prorated-label label {
+    color: #8c6b08 !important;
+    font-weight: 700 !important;
+}
+
+/* Mensaje de información de prorrateo */
+.pmpro-prorated-notice {
+    background-color: #e8f5e8 !important;
+    border: 1px solid #4caf50 !important;
+    border-radius: 6px !important;
+    padding: 12px 16px !important;
+    margin: 12px 0 !important;
+    font-size: 14px !important;
+    line-height: 1.4 !important;
+    color: #2e7d32 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+.pmpro-prorated-notice p {
+    margin: 0 0 8px 0 !important;
+    padding: 0 !important;
+}
+
+.pmpro-prorated-notice p:last-child {
+    margin-bottom: 0 !important;
+}
+
+/* Icono de información */
+.pmpro-prorated-notice::before {
+    content: "ℹ️";
+    margin-right: 8px;
+    font-size: 16px;
+}
+
+/* Estilos para precio prorrateado */
+.prorated-price {
+  color: #b33;               /* rojo oscuro para resaltar */
+  font-weight: 700;
+  transition: color 0.15s;
+}
+
+.pmpro-prorated-notice {
+  border-left: 4px solid #b33;
+  background: #fff5f5;
+  padding: 10px;
+  margin-top: 8px;
+  border-radius: 4px;
+  color: #333;
+  font-size: 0.95em;
+}
+
+.prorated-label {
+  color: #b33;
+  font-weight: 600;
+}
+
+/* Responsive para mensajes de prorrateo */
+@media (max-width: 768px) {
+    .pmpro-prorated-notice {
+        padding: 10px 12px !important;
+        font-size: 13px !important;
+    }
+}
+
+@media (max-width: 480px) {
+    .pmpro-prorated-notice {
+        padding: 8px 10px !important;
+        font-size: 12px !important;
+    }
+}
