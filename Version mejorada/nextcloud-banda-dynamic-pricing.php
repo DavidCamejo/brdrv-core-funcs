@@ -181,7 +181,7 @@ function nextcloud_banda_api_get_group_used_space_mb($user_id) {
         nextcloud_banda_log_error("No se pudo encontrar el usuario de WordPress con ID: {$user_id}");
         return false;
     }
-    $group_id = $wp_user->user_login;
+    $group_id = 'banda-' . $user_id;
 
     // Argumentos base para las peticiones a la API
     $api_args = [
@@ -316,7 +316,7 @@ function nextcloud_banda_get_used_space_tb($user_id) {
     }
     
     // Convierte el valor de MB a TB y redondea a 2 decimales
-    $used_space_tb = round($used_space_mb / 1024 / 1024, 2);
+    $used_space_tb = round($used_space_mb / 1024, 2);
     
     // Guarda el resultado en caché por 5 minutos (300 segundos) para no sobrecargar la API
     nextcloud_banda_cache_set($cache_key, $used_space_tb, 300);
@@ -732,31 +732,69 @@ function nextcloud_banda_localize_pricing_script() {
     }
 
     // Datos del usuario actual
-    $current_storage = '1tb';
-    $current_users = 2; // 2 usuarios por defecto
+    $current_storage = null;
+    $current_users = null;
+    $current_frequency = null;
+    $has_previous_config = false;
     $used_space_tb = 0;
-    
+    $next_payment_date = null;
+
     if (is_user_logged_in()) {
         $user_id = get_current_user_id();
-        $config_json = get_user_meta($user_id, 'nextcloud_banda_config', true);
-        if ($config_json) {
-            $config = json_decode($config_json, true);
-            $current_storage = $config['storage_space'] ?? '1tb';
-            $current_users = (int)($config['num_users'] ?? 2);
+
+        // Comprobar si tiene una membership BANDA activa (evita falsos positivos)
+        $user_levels = function_exists('pmpro_getMembershipLevelsForUser') ? pmpro_getMembershipLevelsForUser($user_id) : [];
+        $allowed_levels = nextcloud_banda_get_config('allowed_levels') ?: [];
+        $has_banda_membership = false;
+
+        if (!empty($user_levels)) {
+            foreach ($user_levels as $l) {
+                if (in_array((int)$l->id, $allowed_levels, true)) {
+                    $has_banda_membership = true;
+                    break;
+                }
+            }
         }
+
+        // Obtener configuración guardada sólo si tiene membership Banda y user_meta existe
+        $config_json = get_user_meta($user_id, 'nextcloud_banda_config', true);
+        if ($has_banda_membership && !empty($config_json)) {
+            $config = json_decode($config_json, true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                $current_storage = $config['storage_space'] ?? null;
+                $current_users = isset($config['num_users']) ? (int)$config['num_users'] : null;
+                $current_frequency = $config['payment_frequency'] ?? null;
+                $has_previous_config = true;
+            }
+        }
+
+        // Intentar obtener fecha de próximo pago desde PMPro (si aplica)
+        if (function_exists('pmpro_getMembershipLevelForUser')) {
+            $member_level = pmpro_getMembershipLevelForUser($user_id);
+            if (!empty($member_level) && !empty($member_level->enddate) && $member_level->enddate !== '0000-00-00 00:00:00') {
+                // Formato ISO 8601 para que JS lo parsee con `new Date(...)`
+                $next_payment_date = date('c', strtotime($member_level->enddate));
+            }
+        }
+
+        // Espacio usado desde Nextcloud (siempre se puede consultar)
         $used_space_tb = nextcloud_banda_get_used_space_tb($user_id);
     }
 
+    // Datos localizados (añadir has_previous_config y current_frequency)
     $localization_data = [
         'level_id' => $current_level,
         'base_price' => $base_price,
         'price_per_tb' => nextcloud_banda_get_config('price_per_tb'),
-        'price_per_user' => nextcloud_banda_get_config('price_per_additional_user'),
-        'base_users_included' => nextcloud_banda_get_config('base_users_included'), // NUEVO
-        'base_storage_included' => nextcloud_banda_get_config('base_storage_included'), // NUEVO
+        'price_per_user' => nextcloud_banda_get_config('price_per_additional_user'), // si tu key usa otro nombre ajústalo
+        'base_users_included' => nextcloud_banda_get_config('base_users_included'),
+        'base_storage_included' => nextcloud_banda_get_config('base_storage_included'),
         'currency_symbol' => 'R$',
-        'current_storage' => $current_storage,
-        'current_users' => $current_users,
+        'current_storage' => $current_storage,           // null si no hay config previa
+        'current_users' => $current_users,               // null si no hay config previa
+        'current_frequency' => $current_frequency,       // null si no hay config previa
+        'has_previous_config' => $has_previous_config,   // bandera explícita
+        'next_payment_date' => $next_payment_date,
         'used_space_tb' => $used_space_tb,
         'debug' => defined('WP_DEBUG') && WP_DEBUG,
         'version' => NEXTCLOUD_BANDA_PLUGIN_VERSION,

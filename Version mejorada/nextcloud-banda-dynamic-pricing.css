@@ -871,6 +871,28 @@ select#payment_frequency {
     font-size: 16px;
 }
 
+/* Estilos para precio prorrateado */
+.prorated-price {
+  color: #b33;               /* rojo oscuro para resaltar */
+  font-weight: 700;
+  transition: color 0.15s;
+}
+
+.pmpro-prorated-notice {
+  border-left: 4px solid #b33;
+  background: #fff5f5;
+  padding: 10px;
+  margin-top: 8px;
+  border-radius: 4px;
+  color: #333;
+  font-size: 0.95em;
+}
+
+.prorated-label {
+  color: #b33;
+  font-weight: 600;
+}
+
 /* Responsive para mensajes de prorrateo */
 @media (max-width: 768px) {
     .pmpro-prorated-notice {
