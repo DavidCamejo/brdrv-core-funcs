@@ -1,204 +1,145 @@
 <?php
-if (!defined('ABSPATH')) {
-    exit;
-}
+/**
+ * Snippet Editor Handler
+ */
 
-class SnippetEditor {
-    
-    private $snippets_dir;
-    private $js_dir;
-    private $css_dir;
-    private $config_file;
+if (!defined('ABSPATH')) exit;
+
+class Simply_Code_Snippet_Editor {
     
     public function __construct() {
-        $this->snippets_dir = SC_PLUGIN_DIR . 'storage/snippets/';
-        $this->js_dir = SC_PLUGIN_DIR . 'storage/js/';
-        $this->css_dir = SC_PLUGIN_DIR . 'storage/css/';
-        $this->config_file = $this->snippets_dir . 'snippets.json';
-        
-        add_action('admin_enqueue_scripts', array($this, 'enqueue_scripts'));
-        add_action('add_meta_boxes', array($this, 'add_meta_boxes'));
-        add_action('save_post_sc_code_snippet', array($this, 'save_snippet'));
+        add_action('admin_post_save_snippet', [$this, 'handle_save']);
+        add_action('admin_post_delete_snippet', [$this, 'handle_delete']);
+        add_action('admin_post_activate_snippet', [$this, 'handle_activation']);
+        add_action('admin_post_deactivate_snippet', [$this, 'handle_activation']);
     }
     
-    public function enqueue_scripts($hook) {
-        if (!in_array($hook, array('post.php', 'post-new.php'))) {
-            return;
-        }
+    public function render_editor($id = '') {
+        $snippet = [];
         
-        $screen = get_current_screen();
-        if ($screen->post_type !== 'sc_code_snippet') {
-            return;
-        }
-        
-        wp_enqueue_style('sc-editor-style', SC_PLUGIN_URL . 'assets/css/editor.css', array(), '1.0.0');
-        wp_enqueue_script('sc-editor-script', SC_PLUGIN_URL . 'assets/js/editor.js', array('jquery'), '1.0.0', true);
-    }
-    
-    public function add_meta_boxes() {
-        add_meta_box(
-            'sc_code_editor',
-            __('Code Editor', 'simply-code'),
-            array($this, 'render_editor'),
-            'sc_code_snippet',
-            'normal',
-            'high'
-        );
-    }
-    
-    public function render_editor($post) {
-        wp_nonce_field('save_sc_snippet', 'sc_snippet_nonce');
-        
-        // Leer el código desde los archivos existentes
-        $php_code = '';
-        $js_code = '';
-        $css_code = '';
-        
-        // Buscar en la estructura antigua
-        $old_php_file = $this->snippets_dir . $post->ID . '.php';
-        $old_js_file = $this->js_dir . $post->ID . '.js';
-        $old_css_file = $this->css_dir . $post->ID . '.css';
-        
-        if (file_exists($old_php_file)) {
-            $php_code = file_get_contents($old_php_file);
-        }
-        
-        if (file_exists($old_js_file)) {
-            $js_code = file_get_contents($old_js_file);
-        }
-        
-        if (file_exists($old_css_file)) {
-            $css_code = file_get_contents($old_css_file);
-        }
-        
-        include SC_PLUGIN_DIR . 'admin/views/snippet-editor.php';
-    }
-    
-    public function save_snippet($post_id) {
-        if (!isset($_POST['sc_snippet_nonce']) || !wp_verify_nonce($_POST['sc_snippet_nonce'], 'save_sc_snippet')) {
-            return;
-        }
-        
-        if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) {
-            return;
-        }
-        
-        if (!current_user_can('edit_post', $post_id)) {
-            return;
-        }
-        
-        // Crear directorios si no existen
-        if (!file_exists($this->snippets_dir)) {
-            wp_mkdir_p($this->snippets_dir);
-        }
-        if (!file_exists($this->js_dir)) {
-            wp_mkdir_p($this->js_dir);
-        }
-        if (!file_exists($this->css_dir)) {
-            wp_mkdir_p($this->css_dir);
-        }
-        
-        // Guardar código PHP y crear backup
-        if (isset($_POST['sc_php_code'])) {
-            $php_code = wp_unslash($_POST['sc_php_code']);
-            $php_file = $this->snippets_dir . $post_id . '.php';
-            file_put_contents($php_file, $php_code);
+        if ($id) {
+            $manager = Simply_Code_Snippet_Manager::get_instance();
+            $snippet = $manager->get_snippet($id);
             
-            // Crear backup de PHP
-            $this->create_backup($post_id, 'php', $php_code);
-        }
-        
-        // Guardar código JavaScript y crear backup
-        if (isset($_POST['sc_js_code'])) {
-            $js_code = wp_unslash($_POST['sc_js_code']);
-            $js_file = $this->js_dir . $post_id . '.js';
-            file_put_contents($js_file, $js_code);
-            
-            // Crear backup de JS
-            $this->create_backup($post_id, 'js', $js_code);
-        }
-        
-        // Guardar código CSS y crear backup
-        if (isset($_POST['sc_css_code'])) {
-            $css_code = wp_unslash($_POST['sc_css_code']);
-            $css_file = $this->css_dir . $post_id . '.css';
-            file_put_contents($css_file, $css_code);
-            
-            // Crear backup de CSS
-            $this->create_backup($post_id, 'css', $css_code);
-        }
-        
-        // Actualizar configuración JSON
-        $this->update_config($post_id, $_POST['post_title']);
-    }
-    
-    private function create_backup($snippet_id, $type, $code) {
-        $backup_dir = SC_PLUGIN_DIR . 'storage/backups/';
-        
-        if (!file_exists($backup_dir)) {
-            wp_mkdir_p($backup_dir);
-        }
-        
-        $filename = sprintf('snippet-%d-%s-%s.%s', 
-            $snippet_id, 
-            $type, 
-            date('Y-m-d-H-i-s'), 
-            $type
-        );
-        
-        $filepath = $backup_dir . $filename;
-        file_put_contents($filepath, $code);
-        
-        // Mantener solo los últimos 5 backups por tipo
-        $this->cleanup_old_backups($snippet_id, $type);
-    }
-    
-    private function cleanup_old_backups($snippet_id, $type) {
-        $backup_dir = SC_PLUGIN_DIR . 'storage/backups/';
-        
-        if (!file_exists($backup_dir)) {
-            return;
-        }
-        
-        $pattern = sprintf('%ssnippet-%d-%s-*.%s', $backup_dir, $snippet_id, $type, $type);
-        $files = glob($pattern);
-        
-        if (count($files) <= 5) {
-            return;
-        }
-        
-        // Ordenar por tiempo de modificación (más reciente primero)
-        usort($files, function($a, $b) {
-            return filemtime($b) - filemtime($a);
-        });
-        
-        // Eliminar archivos más antiguos
-        for ($i = 5; $i < count($files); $i++) {
-            unlink($files[$i]);
-        }
-    }
-    
-    private function update_config($snippet_id, $title) {
-        // Leer configuración existente
-        $config = array();
-        if (file_exists($this->config_file)) {
-            $config_content = file_get_contents($this->config_file);
-            $config = json_decode($config_content, true);
-            if (!is_array($config)) {
-                $config = array();
+            if (!$snippet) {
+                wp_die(__('Snippet not found.', 'simply-code'));
             }
         }
         
-        // Actualizar o agregar snippet
-        $config[$snippet_id] = array(
-            'id' => $snippet_id,
-            'title' => $title,
-            'status' => 'active',
-            'created' => date('Y-m-d H:i:s'),
-            'updated' => date('Y-m-d H:i:s')
-        );
+        include_once SC_ADMIN_DIR . '/views/snippet-editor.php';
+    }
+    
+    public function handle_save() {
+        // Verificar nonce
+        if (!isset($_POST['sc_nonce']) || !wp_verify_nonce($_POST['sc_nonce'], 'save_snippet')) {
+            wp_die(__('Security check failed.', 'simply-code'));
+        }
         
-        // Guardar configuración
-        file_put_contents($this->config_file, json_encode($config, JSON_PRETTY_PRINT));
+        // Verificar permisos
+        if (!current_user_can('manage_options')) {
+            wp_die(__('Insufficient permissions.', 'simply-code'));
+        }
+        
+        $manager = Simply_Code_Snippet_Manager::get_instance();
+        
+        $data = [
+            'id' => sanitize_file_name($_POST['snippet_id'] ?? uniqid()),
+            'name' => sanitize_text_field($_POST['snippet_name'] ?? ''),
+            'description' => sanitize_textarea_field($_POST['snippet_description'] ?? ''),
+            'php' => isset($_POST['php_code']) ? wp_unslash($_POST['php_code']) : '',
+            'js' => isset($_POST['js_code']) ? wp_unslash($_POST['js_code']) : '',
+            'css' => isset($_POST['css_code']) ? wp_unslash($_POST['css_code']) : '',
+            'active' => isset($_POST['snippet_active']) ? 1 : 0
+        ];
+        
+        // Validar nombre
+        if (empty($data['name'])) {
+            $this->redirect_with_message(admin_url('admin.php?page=simply-code-editor'), 'error', __('Name is required.', 'simply-code'));
+            return;
+        }
+        
+        // Guardar snippet
+        $result = $manager->save_snippet($data);
+        
+        if ($result) {
+            $redirect_url = add_query_arg([
+                'page' => 'simply-code-editor',
+                'action' => 'edit',
+                'id' => $result
+            ], admin_url('admin.php'));
+            
+            $this->redirect_with_message($redirect_url, 'success', __('Snippet saved successfully.', 'simply-code'));
+        } else {
+            $this->redirect_with_message(admin_url('admin.php?page=simply-code-editor'), 'error', __('Error saving snippet.', 'simply-code'));
+        }
+    }
+    
+    public function handle_delete() {
+        // Verificar nonce
+        if (!isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'delete_snippet')) {
+            wp_die(__('Security check failed.', 'simply-code'));
+        }
+        
+        // Verificar permisos
+        if (!current_user_can('manage_options')) {
+            wp_die(__('Insufficient permissions.', 'simply-code'));
+        }
+        
+        $id = sanitize_file_name($_GET['id'] ?? '');
+        
+        if (empty($id)) {
+            $this->redirect_with_message(admin_url('admin.php?page=simply-code'), 'error', __('Invalid snippet ID.', 'simply-code'));
+            return;
+        }
+        
+        $manager = Simply_Code_Snippet_Manager::get_instance();
+        $result = $manager->delete_snippet($id);
+        
+        if ($result) {
+            $this->redirect_with_message(admin_url('admin.php?page=simply-code'), 'success', __('Snippet deleted successfully.', 'simply-code'));
+        } else {
+            $this->redirect_with_message(admin_url('admin.php?page=simply-code'), 'error', __('Error deleting snippet.', 'simply-code'));
+        }
+    }
+    
+    public function handle_activation() {
+        // Verificar nonce
+        if (!isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'toggle_snippet')) {
+            wp_die(__('Security check failed.', 'simply-code'));
+        }
+        
+        // Verificar permisos
+        if (!current_user_can('manage_options')) {
+            wp_die(__('Insufficient permissions.', 'simply-code'));
+        }
+        
+        $id = sanitize_file_name($_GET['id'] ?? '');
+        $action = $_GET['action'] ?? '';
+        
+        if (empty($id)) {
+            $this->redirect_with_message(admin_url('admin.php?page=simply-code'), 'error', __('Invalid snippet ID.', 'simply-code'));
+            return;
+        }
+        
+        $manager = Simply_Code_Snippet_Manager::get_instance();
+        $activate = ($action === 'activate_snippet');
+        $result = $manager->activate_snippet($id, $activate);
+        
+        if ($result) {
+            $message = $activate ? __('Snippet activated.', 'simply-code') : __('Snippet deactivated.', 'simply-code');
+            $this->redirect_with_message(admin_url('admin.php?page=simply-code'), 'success', $message);
+        } else {
+            $this->redirect_with_message(admin_url('admin.php?page=simply-code'), 'error', __('Error updating snippet status.', 'simply-code'));
+        }
+    }
+    
+    private function redirect_with_message($url, $type, $message) {
+        $redirect_url = add_query_arg([
+            'sc_message' => urlencode($message),
+            'sc_message_type' => $type
+        ], $url);
+        
+        wp_redirect($redirect_url);
+        exit;
     }
 }

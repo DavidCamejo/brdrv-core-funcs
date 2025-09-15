@@ -1,0 +1,7 @@
+{
+    "description": "Funci\u00f3n de mantenimiento para limpiar datos hu\u00e9rfanos",
+    "last_updated": "2025-09-12 17:46:36",
+    "active": true,
+    "hooks": [],
+    "load_priority": 10
+}

@@ -1,0 +1,50 @@
+{
+    "description": "Agrega opciones din\u00e1micas de suscripci\u00f3n en WooCommerce.",
+    "last_updated": "2025-08-10 04:25:17",
+    "active": true,
+    "hooks": {
+        "wp_enqueue_scripts": {
+            "type": "action",
+            "priority": 10,
+            "accepted_args": 1,
+            "auto_detected": true
+        },
+        "woocommerce_before_add_to_cart_button": {
+            "type": "action",
+            "priority": 10,
+            "accepted_args": 1,
+            "auto_detected": true
+        },
+        "woocommerce_add_cart_item_data": {
+            "type": "filter",
+            "priority": 99,
+            "accepted_args": 2,
+            "auto_detected": true
+        },
+        "woocommerce_before_calculate_totals": {
+            "type": "action",
+            "priority": 99,
+            "accepted_args": 1,
+            "auto_detected": true
+        },
+        "woocommerce_get_item_data": {
+            "type": "filter",
+            "priority": 99,
+            "accepted_args": 2,
+            "auto_detected": true
+        },
+        "woocommerce_product_options_general_product_data": {
+            "type": "action",
+            "priority": 10,
+            "accepted_args": 1,
+            "auto_detected": true
+        },
+        "woocommerce_process_product_meta": {
+            "type": "action",
+            "priority": 10,
+            "accepted_args": 1,
+            "auto_detected": true
+        }
+    },
+    "load_priority": 10
+}

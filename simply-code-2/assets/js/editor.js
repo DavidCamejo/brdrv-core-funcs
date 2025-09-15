@@ -1,38 +1,74 @@
-document.addEventListener('DOMContentLoaded', function() {
-    const tabButtons = document.querySelectorAll('.sc-tab-button');
-    const tabPanes = document.querySelectorAll('.sc-tab-pane');
+/**
+ * Simply Code Editor JavaScript
+ */
+
+(function($) {
+    'use strict';
     
-    if (tabButtons.length > 0) {
-        tabButtons.forEach(button => {
-            button.addEventListener('click', function() {
-                const targetTab = this.getAttribute('data-tab');
-                
-                // Remove active class from all buttons and panes
-                tabButtons.forEach(btn => btn.classList.remove('active'));
-                tabPanes.forEach(pane => pane.classList.remove('active'));
-                
-                // Add active class to clicked button
-                this.classList.add('active');
-                
-                // Show corresponding pane
-                const targetPane = document.querySelector(`[data-tab-content="${targetTab}"]`);
-                if (targetPane) {
-                    targetPane.classList.add('active');
-                }
-            });
+    $(document).ready(function() {
+        
+        // Tab functionality
+        $('.sc-tab-button').on('click', function(e) {
+            e.preventDefault();
+            
+            var tabId = $(this).data('tab');
+            
+            // Remove active classes
+            $('.sc-tab-button').removeClass('active');
+            $('.sc-tab-pane').removeClass('active');
+            
+            // Add active classes
+            $(this).addClass('active');
+            $('#' + tabId).addClass('active');
         });
-    }
-    
-    // Auto-resize textareas
-    const textareas = document.querySelectorAll('.sc-code-editor');
-    textareas.forEach(textarea => {
-        textarea.addEventListener('input', function() {
+        
+        // Auto-select first tab if none selected
+        if ($('.sc-tab-button.active').length === 0) {
+            $('.sc-tab-button:first').click();
+        }
+        
+        // Confirm deletion
+        $(document).on('click', '.sc-confirm-delete', function(e) {
+            if (!confirm(simplyCodeEditor.confirmDelete)) {
+                e.preventDefault();
+            }
+        });
+        
+        // Syntax highlighting toggle (optional enhancement)
+        $('.sc-toggle-syntax').on('click', function(e) {
+            e.preventDefault();
+            var target = $(this).data('target');
+            var $textarea = $('#' + target);
+            
+            if ($textarea.hasClass('syntax-highlighted')) {
+                // Remove syntax highlighting
+                $textarea.removeClass('syntax-highlighted');
+                $(this).text(simplyCodeEditor.enableSyntax);
+            } else {
+                // Add syntax highlighting (would require additional libraries)
+                $textarea.addClass('syntax-highlighted');
+                $(this).text(simplyCodeEditor.disableSyntax);
+            }
+        });
+        
+        // Auto-resize textareas
+        $('textarea.code').each(function() {
+            this.setAttribute('style', 'height:' + (this.scrollHeight) + 'px;overflow-y:hidden;');
+        }).on('input', function() {
             this.style.height = 'auto';
             this.style.height = (this.scrollHeight) + 'px';
         });
         
-        // Initialize height
-        textarea.style.height = 'auto';
-        textarea.style.height = (textarea.scrollHeight) + 'px';
+        // Form validation
+        $('form').on('submit', function() {
+            var $nameField = $('#snippet_name');
+            if ($nameField.val().trim() === '') {
+                alert(simplyCodeEditor.nameRequired);
+                $nameField.focus();
+                return false;
+            }
+            return true;
+        });
     });
-});
+    
+})(jQuery);
