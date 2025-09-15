@@ -1,0 +1,89 @@
+.sc-editor-container {
+    margin: 15px 0;
+}
+
+.sc-tabs-nav {
+    border-bottom: 1px solid #ccc;
+    margin-bottom: 0;
+    display: flex;
+    gap: 2px;
+}
+
+.sc-tab-button {
+    background: #f1f1f1;
+    border: 1px solid #ccc;
+    border-bottom: none;
+    padding: 8px 16px;
+    cursor: pointer;
+    border-radius: 3px 3px 0 0;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    margin-bottom: -1px;
+}
+
+.sc-tab-button:hover {
+    background: #e5e5e5;
+}
+
+.sc-tab-button.active {
+    background: #fff;
+    border-bottom: 1px solid #fff;
+    font-weight: 600;
+    color: #191e23;
+}
+
+.sc-tabs-content {
+    border: 1px solid #ccc;
+    border-top: none;
+    background: #fff;
+}
+
+.sc-tab-pane {
+    display: none;
+    padding: 15px;
+}
+
+.sc-tab-pane.active {
+    display: block;
+}
+
+.sc-code-editor {
+    width: 100%;
+    font-family: 'Monaco', 'Consolas', monospace;
+    font-size: 13px;
+    line-height: 1.4;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 0;
+    resize: vertical;
+    min-height: 200px;
+    background-color: #f9f9f9;
+    tab-size: 4;
+}
+
+.sc-code-editor:focus {
+    outline: none;
+    border-color: #0073aa;
+    box-shadow: 0 0 2px rgba(0, 115, 170, 0.8);
+    background-color: #fff;
+}
+
+.description {
+    margin-top: 8px;
+    color: #666;
+    font-size: 12px;
+    font-style: italic;
+}
+
+@media screen and (max-width: 782px) {
+    .sc-tab-button {
+        padding: 10px 12px;
+        font-size: 14px;
+    }
+    
+    .sc-code-editor {
+        font-size: 14px;
+        min-height: 150px;
+    }
+}
