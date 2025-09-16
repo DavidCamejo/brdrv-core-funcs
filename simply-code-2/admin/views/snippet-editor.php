@@ -4,20 +4,38 @@
  */
 if (!defined('ABSPATH')) exit;
 
-$snippet = isset($args['snippet']) ? $args['snippet'] : [];
-$id = $snippet['id'] ?? '';
-$name = $snippet['name'] ?? '';
-$description = $snippet['description'] ?? '';
-$php_code = $snippet['php'] ?? '';
-$js_code = $snippet['js'] ?? '';
-$css_code = $snippet['css'] ?? '';
+// Asegurar que tengamos los datos del snippet
+if (!isset($snippet)) {
+    $snippet = [
+        'id' => '',
+        'name' => '',
+        'description' => '',
+        'php' => '',
+        'js' => '',
+        'css' => '',
+        'active' => 1
+    ];
+}
+
+// Extraer variables para uso más fácil
+$id = isset($snippet['id']) ? $snippet['id'] : '';
+$name = isset($snippet['name']) ? $snippet['name'] : '';
+$description = isset($snippet['description']) ? $snippet['description'] : '';
+$php_code = isset($snippet['php']) ? $snippet['php'] : '';
+$js_code = isset($snippet['js']) ? $snippet['js'] : '';
+$css_code = isset($snippet['css']) ? $snippet['css'] : '';
 $active = isset($snippet['active']) ? $snippet['active'] : 1;
+
+// Variable crítica para hooks (definida para evitar warning)
+$critical_hooks = [
+    'wp_head', 'wp_footer', 'init', 'wp_loaded', 'admin_init'
+];
 ?>
 
 <div class="wrap">
     <h1><?php echo $id ? __('Edit Snippet', 'simply-code') : __('Add New Snippet', 'simply-code'); ?></h1>
     
-    <form method="post" action="">
+    <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
         <?php wp_nonce_field('save_snippet', 'sc_nonce'); ?>
         
         <input type="hidden" name="action" value="save_snippet">
@@ -150,5 +168,10 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById(tabId).classList.add('active');
         });
     });
+    
+    // Auto-select first tab if none is active
+    if (document.querySelectorAll('.sc-tab-button.active').length === 0) {
+        document.querySelector('.sc-tab-button').click();
+    }
 });
 </script>

@@ -3,7 +3,7 @@
  * Plugin Name: Simply Code
  * Plugin URI: https://github.com/DavidCamejo/simply-code
  * Description: A minimalist plugin to run custom code snippets using JSON files instead of database.
- * Version: 1.2.1
+ * Version: 1.2.4
  * Author: David Camejo
  * Text Domain: simply-code
  */
@@ -11,50 +11,40 @@
 if (!defined('ABSPATH')) exit;
 
 // Define constants
-define('SC_VERSION', '1.2.1');
+define('SC_VERSION', '1.2.4');
 define('SC_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('SC_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('SC_ADMIN_DIR', SC_PLUGIN_DIR . 'admin');
 define('SC_INCLUDES_DIR', SC_PLUGIN_DIR . 'includes');
 define('SC_ASSETS_DIR', SC_PLUGIN_DIR . 'assets');
 define('SC_STORAGE_DIR', SC_PLUGIN_DIR . 'storage');
-define('SC_TEMPLATES_DIR', SC_PLUGIN_DIR . 'templates');
 
 // Autoload classes
-spl_autoload_register(function($class) {
+function simply_code_autoload($class) {
     $prefix = 'Simply_Code_';
-    $base_dir = SC_INCLUDES_DIR . '/';
     
     if (strpos($class, $prefix) !== 0) {
         return;
     }
     
     $relative_class = substr($class, strlen($prefix));
-    $file = $base_dir . 'class-' . strtolower(str_replace('_', '-', $relative_class)) . '.php';
     
+    // Try includes directory first
+    $file = SC_INCLUDES_DIR . '/class-' . strtolower(str_replace('_', '-', $relative_class)) . '.php';
     if (file_exists($file)) {
         require_once $file;
+        return;
     }
-});
-
-// Admin classes
-if (is_admin()) {
-    spl_autoload_register(function($class) {
-        $prefix = 'Simply_Code_';
-        $base_dir = SC_ADMIN_DIR . '/';
-        
-        if (strpos($class, $prefix) !== 0) {
-            return;
-        }
-        
-        $relative_class = substr($class, strlen($prefix));
-        $file = $base_dir . 'class-' . strtolower(str_replace('_', '-', $relative_class)) . '.php';
-        
-        if (file_exists($file)) {
-            require_once $file;
-        }
-    });
+    
+    // Try admin directory
+    $file = SC_ADMIN_DIR . '/class-' . strtolower(str_replace('_', '-', $relative_class)) . '.php';
+    if (file_exists($file)) {
+        require_once $file;
+        return;
+    }
 }
+
+spl_autoload_register('simply_code_autoload');
 
 class Simply_Code {
     
@@ -83,7 +73,6 @@ class Simply_Code {
     
     public function init() {
         load_plugin_textdomain('simply-code', false, dirname(plugin_basename(__FILE__)) . '/languages');
-        $this->snippet_manager = Simply_Code_Snippet_Manager::get_instance();
     }
     
     public function enqueue_public_assets() {
@@ -105,9 +94,7 @@ class Simply_Code {
         
         wp_localize_script('simply-code-admin', 'simplyCodeEditor', [
             'confirmDelete' => __('Are you sure you want to delete this snippet?', 'simply-code'),
-            'nameRequired' => __('Please enter a name for the snippet.', 'simply-code'),
-            'enableSyntax' => __('Enable Syntax Highlighting', 'simply-code'),
-            'disableSyntax' => __('Disable Syntax Highlighting', 'simply-code')
+            'nameRequired' => __('Please enter a name for the snippet.', 'simply-code')
         ]);
     }
     
@@ -141,15 +128,12 @@ class Simply_Code {
     }
     
     public function render_admin_page() {
-        $action = $_GET['action'] ?? '';
-        $id = $_GET['id'] ?? '';
+        $action = isset($_GET['action']) ? sanitize_text_field($_GET['action']) : '';
+        $id = isset($_GET['id']) ? sanitize_file_name($_GET['id']) : '';
         
         switch ($action) {
             case 'edit':
                 $this->render_editor_page($id);
-                break;
-            case 'view-backups':
-                $this->render_backups_page($id);
                 break;
             default:
                 $this->render_snippets_list();
@@ -158,36 +142,34 @@ class Simply_Code {
     }
     
     public function render_editor_page($id = '') {
+        // Verificar que el archivo exista antes de crear la instancia
+        $editor_file = SC_ADMIN_DIR . '/class-snippet-editor.php';
+        if (!file_exists($editor_file)) {
+            wp_die(__('Editor class file not found.', 'simply-code'));
+        }
+        
         $editor = new Simply_Code_Snippet_Editor();
         $editor->render_editor($id);
     }
     
     public function render_snippets_list() {
+        // Verificar que el archivo exista
+        $view_file = SC_ADMIN_DIR . '/views/snippets-list.php';
+        if (!file_exists($view_file)) {
+            echo '<div class="wrap"><h1>' . __('Simply Code', 'simply-code') . '</h1>';
+            echo '<div class="notice notice-error"><p>' . __('Snippets list view file not found.', 'simply-code') . '</p></div>';
+            echo '<p>Expected file: ' . esc_html($view_file) . '</p>';
+            echo '<p>Current directory: ' . esc_html(SC_PLUGIN_DIR) . '</p>';
+            echo '</div>';
+            return;
+        }
+        
+        // Initialize manager and get snippets
         $manager = Simply_Code_Snippet_Manager::get_instance();
         $snippets = $manager->get_all_snippets();
         
-        include_once SC_ADMIN_DIR . '/views/snippets-list.php';
-    }
-    
-    public function render_backups_page($id) {
-        $manager = Simply_Code_Snippet_Manager::get_instance();
-        $snippet = $manager->get_snippet($id);
-        $backups = $manager->get_backups($id);
-        
-        if (!$snippet) {
-            wp_die(__('Snippet not found.', 'simply-code'));
-        }
-        
-        // Incluir un archivo de backups si existe, o mostrar mensaje
-        $backups_file = SC_ADMIN_DIR . '/views/backups-list.php';
-        if (file_exists($backups_file)) {
-            include_once $backups_file;
-        } else {
-            echo '<div class="wrap"><h1>' . __('Backups', 'simply-code') . '</h1>';
-            echo '<p>' . __('Backup functionality will be available in future versions.', 'simply-code') . '</p>';
-            echo '<a href="' . admin_url('admin.php?page=simply-code') . '" class="button button-secondary">' . __('Back to Snippets', 'simply-code') . '</a>';
-            echo '</div>';
-        }
+        // Pasar datos a la vista
+        include_once $view_file;
     }
     
     public function handle_admin_actions() {
@@ -198,14 +180,16 @@ class Simply_Code {
     }
     
     public function display_admin_message() {
-        $message = urldecode($_GET['sc_message']);
-        $type = $_GET['sc_message_type'] ?? 'info';
+        $message = isset($_GET['sc_message']) ? urldecode($_GET['sc_message']) : '';
+        $type = isset($_GET['sc_message_type']) ? sanitize_text_field($_GET['sc_message_type']) : 'info';
         
-        printf(
-            '<div class="notice notice-%s is-dismissible"><p>%s</p></div>',
-            esc_attr($type),
-            esc_html($message)
-        );
+        if (!empty($message)) {
+            printf(
+                '<div class="notice notice-%s is-dismissible"><p>%s</p></div>',
+                esc_attr($type),
+                esc_html($message)
+            );
+        }
     }
     
     public function execute_active_snippets() {
@@ -213,6 +197,7 @@ class Simply_Code {
             return;
         }
         
+        // Initialize manager
         $manager = Simply_Code_Snippet_Manager::get_instance();
         $snippets = $manager->get_all_snippets();
         
@@ -225,7 +210,9 @@ class Simply_Code {
 }
 
 // Initialize the plugin
-Simply_Code::get_instance();
+add_action('plugins_loaded', function() {
+    Simply_Code::get_instance();
+}, 10);
 
 // Activation hook
 register_activation_hook(__FILE__, function() {

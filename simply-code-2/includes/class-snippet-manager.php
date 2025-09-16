@@ -58,16 +58,17 @@ class Simply_Code_Snippet_Manager {
     
     public function get_all_snippets() {
         $snippets = [];
-        $files = glob(SC_STORAGE_DIR . '/snippets/*.json');
+        $pattern = SC_STORAGE_DIR . '/snippets/*.json';
+        $files = glob($pattern);
         
-        if (!$files) {
+        if (!$files || !is_array($files)) {
             return $snippets;
         }
         
         foreach ($files as $file) {
             $id = basename($file, '.json');
             $snippet = $this->get_snippet($id);
-            if ($snippet) {
+            if ($snippet !== false && is_array($snippet)) {
                 $snippets[$id] = $snippet;
             }
         }
@@ -76,7 +77,7 @@ class Simply_Code_Snippet_Manager {
     }
     
     public function save_snippet($data) {
-        $id = sanitize_file_name($data['id'] ?? uniqid());
+        $id = sanitize_file_name(isset($data['id']) ? $data['id'] : uniqid());
         $file = SC_STORAGE_DIR . "/snippets/{$id}.json";
         
         // Si existe y estamos actualizando, hacer backup
@@ -92,13 +93,13 @@ class Simply_Code_Snippet_Manager {
         
         // Preparar datos para guardar
         $snippet_data = [
-            'name' => sanitize_text_field($data['name'] ?? ''),
-            'description' => sanitize_textarea_field($data['description'] ?? ''),
+            'name' => sanitize_text_field(isset($data['name']) ? $data['name'] : ''),
+            'description' => sanitize_textarea_field(isset($data['description']) ? $data['description'] : ''),
             'php' => isset($data['php']) ? $data['php'] : '',
             'js' => isset($data['js']) ? $data['js'] : '',
             'css' => isset($data['css']) ? $data['css'] : '',
             'active' => isset($data['active']) ? 1 : 0,
-            'created_at' => $existing_data['created_at'] ?? current_time('mysql'),
+            'created_at' => isset($existing_data['created_at']) ? $existing_data['created_at'] : current_time('mysql'),
             'updated_at' => current_time('mysql')
         ];
         
@@ -152,7 +153,7 @@ class Simply_Code_Snippet_Manager {
         }
         
         // Backup de JS
-        if (!empty($existing_data['js'])) {
+        if (isset($existing_data['js']) && !empty($existing_data['js'])) {
             $backup_file = "{$backup_dir}/{$id}_js_backup_{$timestamp}.txt";
             $result = file_put_contents($backup_file, $existing_data['js']);
             if ($result === false) {
@@ -161,7 +162,7 @@ class Simply_Code_Snippet_Manager {
         }
         
         // Backup de CSS
-        if (!empty($existing_data['css'])) {
+        if (isset($existing_data['css']) && !empty($existing_data['css'])) {
             $backup_file = "{$backup_dir}/{$id}_css_backup_{$timestamp}.txt";
             $result = file_put_contents($backup_file, $existing_data['css']);
             if ($result === false) {
@@ -216,16 +217,18 @@ class Simply_Code_Snippet_Manager {
     
     public function execute_snippet($id) {
         $snippet = $this->get_snippet($id);
-        if (!$snippet || !$snippet['active']) {
+        if (!$snippet || !isset($snippet['active']) || !$snippet['active']) {
             return;
         }
         
         // Ejecutar PHP con manejo de errores
         if (!empty($snippet['php'])) {
             try {
-                eval($snippet['php']);
+                eval('?>' . $snippet['php']);
             } catch (Exception $e) {
                 error_log("Simply Code: PHP execution error in snippet {$id}: " . $e->getMessage());
+            } catch (ParseError $e) {
+                error_log("Simply Code: PHP parse error in snippet {$id}: " . $e->getMessage());
             }
         }
         

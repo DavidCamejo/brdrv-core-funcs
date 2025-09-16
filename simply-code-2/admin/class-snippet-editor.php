@@ -5,6 +5,9 @@
 
 if (!defined('ABSPATH')) exit;
 
+// Verificar que la clase no exista antes de declararla
+if (!class_exists('Simply_Code_Snippet_Editor')) {
+
 class Simply_Code_Snippet_Editor {
     
     public function __construct() {
@@ -21,12 +24,30 @@ class Simply_Code_Snippet_Editor {
             $manager = Simply_Code_Snippet_Manager::get_instance();
             $snippet = $manager->get_snippet($id);
             
-            if (!$snippet) {
+            if ($snippet === false) {
                 wp_die(__('Snippet not found.', 'simply-code'));
             }
+            
+            // Asegurar que todos los campos existan
+            $snippet = wp_parse_args($snippet, [
+                'id' => $id,
+                'name' => '',
+                'description' => '',
+                'php' => '',
+                'js' => '',
+                'css' => '',
+                'active' => 1
+            ]);
         }
         
-        include_once SC_ADMIN_DIR . '/views/snippet-editor.php';
+        // Verificar que el archivo de vista exista
+        $view_file = SC_ADMIN_DIR . '/views/snippet-editor.php';
+        if (!file_exists($view_file)) {
+            wp_die(__('Editor view file not found.', 'simply-code'));
+        }
+        
+        // Pasar los datos del snippet a la vista
+        include_once $view_file;
     }
     
     public function handle_save() {
@@ -43,9 +64,9 @@ class Simply_Code_Snippet_Editor {
         $manager = Simply_Code_Snippet_Manager::get_instance();
         
         $data = [
-            'id' => sanitize_file_name($_POST['snippet_id'] ?? uniqid()),
-            'name' => sanitize_text_field($_POST['snippet_name'] ?? ''),
-            'description' => sanitize_textarea_field($_POST['snippet_description'] ?? ''),
+            'id' => sanitize_file_name(isset($_POST['snippet_id']) ? $_POST['snippet_id'] : uniqid()),
+            'name' => sanitize_text_field(isset($_POST['snippet_name']) ? $_POST['snippet_name'] : ''),
+            'description' => sanitize_textarea_field(isset($_POST['snippet_description']) ? $_POST['snippet_description'] : ''),
             'php' => isset($_POST['php_code']) ? wp_unslash($_POST['php_code']) : '',
             'js' => isset($_POST['js_code']) ? wp_unslash($_POST['js_code']) : '',
             'css' => isset($_POST['css_code']) ? wp_unslash($_POST['css_code']) : '',
@@ -85,7 +106,7 @@ class Simply_Code_Snippet_Editor {
             wp_die(__('Insufficient permissions.', 'simply-code'));
         }
         
-        $id = sanitize_file_name($_GET['id'] ?? '');
+        $id = sanitize_file_name(isset($_GET['id']) ? $_GET['id'] : '');
         
         if (empty($id)) {
             $this->redirect_with_message(admin_url('admin.php?page=simply-code'), 'error', __('Invalid snippet ID.', 'simply-code'));
@@ -113,8 +134,8 @@ class Simply_Code_Snippet_Editor {
             wp_die(__('Insufficient permissions.', 'simply-code'));
         }
         
-        $id = sanitize_file_name($_GET['id'] ?? '');
-        $action = $_GET['action'] ?? '';
+        $id = sanitize_file_name(isset($_GET['id']) ? $_GET['id'] : '');
+        $action = isset($_GET['action']) ? sanitize_text_field($_GET['action']) : '';
         
         if (empty($id)) {
             $this->redirect_with_message(admin_url('admin.php?page=simply-code'), 'error', __('Invalid snippet ID.', 'simply-code'));
@@ -143,3 +164,5 @@ class Simply_Code_Snippet_Editor {
         exit;
     }
 }
+
+} // End class_exists check
