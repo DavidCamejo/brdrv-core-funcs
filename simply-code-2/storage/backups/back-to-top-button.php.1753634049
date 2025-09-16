@@ -1,5 +1,0 @@
-<?php
-// @description Nuevo snippet
-
-if (!defined('ABSPATH')) exit;
-
