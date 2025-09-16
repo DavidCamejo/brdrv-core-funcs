@@ -1,0 +1,7 @@
+{
+    "description": "Provides comprehensive monitoring and debugging tools for the Banda system",
+    "last_updated": "2025-09-08 05:26:35",
+    "active": true,
+    "hooks": [],
+    "load_priority": 10
+}

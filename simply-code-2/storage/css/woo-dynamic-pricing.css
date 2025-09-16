@@ -1,0 +1,22 @@
+/**
+ * wc-subscription-pricing.css
+ */
+.wc-subscription-pricing-wrapper {
+    margin: 0 0 20px 0;
+}
+
+label[for="storage_space"],
+label[for="payment_frequency"] {
+    display: block;
+    font-size: .8em;
+    font-weight: 500;
+    margin-bottom: 0 !important;
+}
+
+.wc-subscription-select {
+    width: 100%;
+    max-width: 250px;
+    padding: .6rem .9rem !important;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
