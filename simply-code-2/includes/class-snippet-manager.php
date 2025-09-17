@@ -41,7 +41,8 @@ class Simply_Code_Snippet_Manager {
                 $data = json_decode(file_get_contents($json_path), true);
                 
                 if ($data) {
-                    $snippet_id = $data['id'];
+                    // ✅ CORRECCIÓN 1: Verificar que exista 'id'
+                    $snippet_id = isset($data['id']) ? $data['id'] : pathinfo($file, PATHINFO_FILENAME);
                     
                     // Get all component contents
                     $components = array('php', 'js', 'css');
@@ -182,29 +183,80 @@ class Simply_Code_Snippet_Manager {
         
         $snippet = $snippets[$id];
         
-        if (!$snippet['active']) {
+        // ✅ CORRECCIÓN 2: Verificar que exista 'active' y sea true
+        $is_active = isset($snippet['active']) ? (bool)$snippet['active'] : false;
+        if (!$is_active) {
             return false;
         }
         
+        // ✅ CORRECCIÓN 3: Verificar que 'components_enabled' sea un array
+        $components_enabled = isset($snippet['components_enabled']) ? $snippet['components_enabled'] : array();
+        if (!is_array($components_enabled)) {
+            $components_enabled = array();
+        }
+        
         // Execute PHP component
-        if (in_array('php', $snippet['components_enabled']) && !empty($snippet['components']['php'])) {
+        if (in_array('php', $components_enabled) && !empty($snippet['components']['php'])) {
             eval('?>' . $snippet['components']['php']);
         }
         
         // Enqueue JS component
-        if (in_array('js', $snippet['components_enabled']) && !empty($snippet['components']['js'])) {
+        if (in_array('js', $components_enabled) && !empty($snippet['components']['js'])) {
             add_action('wp_footer', function() use ($snippet) {
                 echo '<script>' . $snippet['components']['js'] . '</script>';
             });
         }
         
         // Enqueue CSS component
-        if (in_array('css', $snippet['components_enabled']) && !empty($snippet['components']['css'])) {
+        if (in_array('css', $components_enabled) && !empty($snippet['components']['css'])) {
             add_action('wp_head', function() use ($snippet) {
                 echo '<style>' . $snippet['components']['css'] . '</style>';
             });
         }
         
         return true;
+    }
+
+    /**
+     * Get snippet data for editor (with actual component contents)
+     */
+    public function get_snippet_for_editor($id) {
+        $snippets_dir = SC_STORAGE_PATH . '/snippets/';
+        $json_path = $snippets_dir . $id . '.json';
+        
+        if (!file_exists($json_path)) {
+            return false;
+        }
+        
+        $metadata = json_decode(file_get_contents($json_path), true);
+        
+        if (!$metadata) {
+            return false;
+        }
+        
+        // Load actual component contents from files
+        $components = array('php', 'js', 'css');
+        foreach ($components as $component) {
+            $content_file = $id . '.' . $component;
+            $content_path = $snippets_dir . $content_file;
+            
+            if (file_exists($content_path)) {
+                $metadata['components'][$component] = file_get_contents($content_path);
+            } else {
+                $metadata['components'][$component] = '';
+            }
+        }
+        
+        // Ensure components_enabled is an array
+        if (!isset($metadata['components_enabled']) || !is_array($metadata['components_enabled'])) {
+            $metadata['components_enabled'] = array();
+        }
+        
+        // Ensure other required fields exist
+        $metadata['title'] = isset($metadata['title']) ? $metadata['title'] : $id;
+        $metadata['description'] = isset($metadata['description']) ? $metadata['description'] : '';
+        $metadata['active'] = isset($metadata['active']) ? (bool)$metadata['active'] : false;
+        
+        return $metadata;
     }
 }
