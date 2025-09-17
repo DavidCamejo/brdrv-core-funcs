@@ -1,216 +1,188 @@
-/**
- * Simply Code Editor Styles
- */
+/* Simply Code Editor Styles */
+.wrap {
+    margin: 10px 20px 0 2px;
+}
 
-/* Tabs Interface */
-.sc-tabs-wrapper {
-    margin: 20px 0;
+.postbox {
+    margin-bottom: 20px;
     border: 1px solid #c3c4c7;
-    border-radius: 3px;
-    background: #fff;
     box-shadow: 0 1px 1px rgba(0,0,0,.04);
+    background: #fff;
 }
 
-.sc-tab-buttons {
-    display: flex;
+.hndle {
+    font-size: 14px;
+    padding: 8px 12px;
+    margin: 0;
+    line-height: 1.4;
     border-bottom: 1px solid #c3c4c7;
-    background: #f0f0f1;
-    border-radius: 3px 3px 0 0;
 }
 
-.sc-tab-button {
-    background: none;
-    border: none;
-    padding: 12px 16px;
+.inside {
+    padding: 0 12px 12px;
+}
+
+.snippet-tabs {
+    margin-top: 10px;
+}
+
+.snippet-tab-nav {
+    border-bottom: 1px solid #ccc;
+    margin-bottom: 0;
+    background: #f9f9f9;
+    padding: 0 10px;
+}
+
+.tab-button {
+    background: #e5e5e5;
+    border: 1px solid #ccc;
+    border-bottom: none;
+    padding: 8px 16px;
+    margin-bottom: -1px;
     cursor: pointer;
-    font-weight: 500;
-    border-right: 1px solid #c3c4c7;
-    transition: all 0.1s ease-in-out;
-    color: #50575e;
-    font-size: 13px;
+    border-radius: 3px 3px 0 0;
+    margin-right: 2px;
+    margin-top: 10px;
+    font-weight: 600;
 }
 
-.sc-tab-button:last-child {
-    border-right: none;
-}
-
-.sc-tab-button:hover {
-    background: #ddd;
-    color: #1d2327;
-}
-
-.sc-tab-button.active {
+.tab-button.active {
     background: #fff;
-    color: #1d2327;
-    box-shadow: inset 0 -1px 0 #fff;
+    border-bottom: 1px solid #fff;
     position: relative;
+    color: #1d2327;
 }
 
-.sc-tab-button.active::after {
-    content: '';
-    position: absolute;
-    bottom: -1px;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: #fff;
+.tab-button:hover:not(.active) {
+    background: #d5d5d5;
 }
 
-.sc-tab-content {
-    padding: 0;
+.has-content {
+    color: #0073aa;
+    margin-left: 5px;
+    font-weight: normal;
 }
 
-.sc-tab-pane {
+.tab-content {
     display: none;
-    padding: 15px;
+    padding: 15px 0;
 }
 
-.sc-tab-pane.active {
+.tab-content.active {
     display: block;
 }
 
-.sc-tab-pane textarea {
+.component-header {
+    margin-bottom: 10px;
+    padding: 10px;
+    background: #f0f0f1;
+    border: 1px solid #dcdcde;
+    border-radius: 3px;
+}
+
+.code-editor {
+    font-family: Consolas, Monaco, monospace;
+    font-size: 13px;
+    background-color: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    padding: 10px;
     width: 100%;
-    font-family: monospace;
+    box-sizing: border-box;
     resize: vertical;
     min-height: 300px;
-    border: 1px solid #8c8f94;
-    border-radius: 3px;
-    padding: 8px;
-    font-size: 13px;
-    line-height: 1.4;
 }
 
-.sc-tab-pane textarea:focus {
-    border-color: #2271b1;
-    box-shadow: 0 0 0 1px #2271b1;
-    outline: 2px solid transparent;
+.form-table th {
+    width: 200px;
+    padding: 15px 10px 15px 0;
 }
 
-/* Messages */
-.sc-message {
-    padding: 10px 15px;
-    margin: 15px 0;
-    border-left: 4px solid #fff;
-    background: #fff;
-    box-shadow: 0 1px 1px rgba(0,0,0,.04);
+.form-table td {
+    padding: 15px 10px;
 }
 
-.sc-message.success {
-    border-left-color: #00a32a;
-    background: #edfaef;
-}
-
-.sc-message.error {
-    border-left-color: #d63638;
-    background: #fcf0f1;
-}
-
-.sc-message.info {
-    border-left-color: #04a4cc;
-    background: #f0f6fc;
-}
-
-/* Backup List */
-.sc-backup-list {
-    margin: 20px 0;
-    background: #fff;
-    border: 1px solid #c3c4c7;
-    border-radius: 3px;
-}
-
-.sc-backup-list h3 {
-    margin: 0;
-    padding: 15px;
-    border-bottom: 1px solid #c3c4c7;
-    background: #f0f0f1;
-    font-size: 14px;
-}
-
-.sc-backup-items {
-    padding: 0;
-    margin: 0;
-    max-height: 300px;
-    overflow-y: auto;
-}
-
-.sc-backup-item {
-    padding: 12px 15px;
-    border-bottom: 1px solid #f0f0f1;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.sc-backup-item:last-child {
-    border-bottom: none;
-}
-
-.sc-backup-info {
-    flex: 1;
-}
-
-.sc-backup-type {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 2px;
-    font-size: 11px;
-    font-weight: bold;
-    text-transform: uppercase;
-}
-
-.sc-backup-type.php { background: #8892bf; color: white; }
-.sc-backup-type.js { background: #f7df1e; color: black; }
-.sc-backup-type.css { background: #264de4; color: white; }
-
-.sc-backup-date {
+.snippet-description {
+    margin: 5px 0 0 0;
+    font-style: italic;
+    color: #666;
     font-size: 12px;
-    color: #646970;
-    margin-top: 4px;
 }
 
-.sc-backup-actions {
-    margin-left: 15px;
-}
-
-.sc-backup-actions a {
-    text-decoration: none;
-    padding: 4px 8px;
-    border: 1px solid #2271b1;
+.component-badge {
+    display: inline-block;
+    padding: 2px 6px;
     border-radius: 3px;
-    color: #2271b1;
-    font-size: 11px;
-    margin-left: 5px;
+    font-size: 10px;
+    font-weight: bold;
+    margin: 0 2px;
 }
 
-.sc-backup-actions a:hover {
-    background: #2271b1;
+.component-php {
+    background-color: #8892BF;
     color: white;
 }
 
-.sc-backup-actions a.delete {
-    border-color: #d63638;
-    color: #d63638;
+.component-js {
+    background-color: #F7DF1E;
+    color: black;
 }
 
-.sc-backup-actions a.delete:hover {
-    background: #d63638;
+.component-css {
+    background-color: #1E90FF;
     color: white;
 }
 
-/* Responsive */
+.no-components {
+    color: #999;
+    font-style: italic;
+}
+
+.snippet-status-active {
+    color: #00A32A;
+    font-weight: bold;
+}
+
+.snippet-status-inactive {
+    color: #DC3232;
+}
+
+.button-link-delete {
+    color: #dc3232;
+    text-decoration: none;
+    margin-left: 10px;
+}
+
+.button-link-delete:hover {
+    color: #dc3232;
+    text-decoration: underline;
+}
+
+.notice {
+    margin: 10px 0;
+}
+
+/* Responsive adjustments */
 @media screen and (max-width: 782px) {
-    .sc-tab-buttons {
-        flex-wrap: wrap;
+    .form-table th {
+        width: 150px;
     }
     
-    .sc-tab-button {
-        flex: 1;
-        text-align: center;
-        border-bottom: 1px solid #c3c4c7;
+    .tab-button {
+        padding: 10px 12px;
+        font-size: 14px;
     }
-    
-    .sc-tab-button:last-child {
-        border-right: 1px solid #c3c4c7;
-    }
+}
+
+/* Syntax highlighting hints */
+.code-editor.php {
+    /* PHP specific styling could go here */
+}
+
+.code-editor.js {
+    /* JavaScript specific styling could go here */
+}
+
+.code-editor.css {
+    /* CSS specific styling could go here */
 }

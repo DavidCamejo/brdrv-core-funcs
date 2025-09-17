@@ -1,6 +1,6 @@
 {
     "description": "PMPro Dynamic Pricing para el Plan Nextcloud Banda",
-    "last_updated": "2025-09-12 17:46:47",
+    "last_updated": "2025-09-16 14:39:17",
     "active": true,
     "hooks": {
         "admin_notices": {

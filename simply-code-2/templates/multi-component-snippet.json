@@ -1,0 +1,9 @@
+{
+    "id": "multi-component-example",
+    "title": "Multi-Component Example",
+    "description": "Example of a snippet with PHP, JS, and CSS components",
+    "active": false,
+    "components_enabled": ["php", "js", "css"],
+    "created": "2024-01-01 00:00:00",
+    "modified": "2024-01-01 00:00:00"
+}

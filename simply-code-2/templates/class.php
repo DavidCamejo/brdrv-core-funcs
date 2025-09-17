@@ -1,11 +1,23 @@
 <?php
-// @description Clase personalizada
-class Mi_Clase_Personalizada {
+/**
+ * Template: Custom Class
+ */
+
+class MyCustomClass {
+    
     public function __construct() {
-        // Inicialización
+        // Hook into WordPress
+        add_action('init', array($this, 'initialize'));
     }
     
-    public function mi_metodo() {
-        // Código del método
+    public function initialize() {
+        // Initialization code here
+    }
+    
+    public function my_custom_method() {
+        // Your custom method
     }
 }
+
+// Instantiate the class
+$my_custom_class = new MyCustomClass();

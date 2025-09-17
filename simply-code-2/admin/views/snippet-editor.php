@@ -1,177 +1,287 @@
 <?php
 /**
- * Snippet Editor View with Tabs
+ * Snippet editor view with tabs for multiple components
  */
-if (!defined('ABSPATH')) exit;
-
-// Asegurar que tengamos los datos del snippet
-if (!isset($snippet)) {
-    $snippet = [
-        'id' => '',
-        'name' => '',
-        'description' => '',
-        'php' => '',
-        'js' => '',
-        'css' => '',
-        'active' => 1
-    ];
+if (!defined('ABSPATH')) {
+    exit;
 }
-
-// Extraer variables para uso más fácil
-$id = isset($snippet['id']) ? $snippet['id'] : '';
-$name = isset($snippet['name']) ? $snippet['name'] : '';
-$description = isset($snippet['description']) ? $snippet['description'] : '';
-$php_code = isset($snippet['php']) ? $snippet['php'] : '';
-$js_code = isset($snippet['js']) ? $snippet['js'] : '';
-$css_code = isset($snippet['css']) ? $snippet['css'] : '';
-$active = isset($snippet['active']) ? $snippet['active'] : 1;
-
-// Variable crítica para hooks (definida para evitar warning)
-$critical_hooks = [
-    'wp_head', 'wp_footer', 'init', 'wp_loaded', 'admin_init'
-];
 ?>
 
 <div class="wrap">
-    <h1><?php echo $id ? __('Edit Snippet', 'simply-code') : __('Add New Snippet', 'simply-code'); ?></h1>
+    <h1><?php echo empty($data['id']) ? __('Add New Snippet', 'simply-code') : __('Edit Snippet', 'simply-code'); ?></h1>
     
-    <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-        <?php wp_nonce_field('save_snippet', 'sc_nonce'); ?>
+    <form method="post" action="" id="snippet-editor-form">
+        <?php wp_nonce_field('sc_save_snippet', 'sc_save_nonce'); ?>
         
-        <input type="hidden" name="action" value="save_snippet">
-        <?php if ($id): ?>
-            <input type="hidden" name="snippet_id" value="<?php echo esc_attr($id); ?>">
-        <?php endif; ?>
-        
-        <table class="form-table">
-            <tr>
-                <th scope="row"><label for="snippet_name"><?php _e('Name', 'simply-code'); ?></label></th>
-                <td><input name="snippet_name" type="text" id="snippet_name" value="<?php echo esc_attr($name); ?>" class="regular-text" required></td>
-            </tr>
-            <tr>
-                <th scope="row"><label for="snippet_description"><?php _e('Description', 'simply-code'); ?></label></th>
-                <td><textarea name="snippet_description" id="snippet_description" rows="3" cols="50" class="large-text"><?php echo esc_textarea($description); ?></textarea></td>
-            </tr>
-            <tr>
-                <th scope="row"><?php _e('Active', 'simply-code'); ?></th>
-                <td>
-                    <fieldset>
-                        <label>
-                            <input type="checkbox" name="snippet_active" value="1" <?php checked($active, 1); ?>>
-                            <span><?php _e('Enable this snippet', 'simply-code'); ?></span>
-                        </label>
-                    </fieldset>
-                </td>
-            </tr>
-        </table>
-
-        <!-- TABS INTERFACE -->
-        <div class="sc-tabs-wrapper">
-            <div class="sc-tab-buttons">
-                <button type="button" class="sc-tab-button active" data-tab="php"><?php _e('PHP', 'simply-code'); ?></button>
-                <button type="button" class="sc-tab-button" data-tab="js"><?php _e('JavaScript', 'simply-code'); ?></button>
-                <button type="button" class="sc-tab-button" data-tab="css"><?php _e('CSS', 'simply-code'); ?></button>
+        <!-- Basic Info -->
+        <div class="postbox">
+            <h2 class="hndle"><?php _e('Snippet Information', 'simply-code'); ?></h2>
+            <div class="inside">
+                <table class="form-table">
+                    <tr>
+                        <th scope="row">
+                            <label for="snippet_id"><?php _e('Snippet ID', 'simply-code'); ?></label>
+                        </th>
+                        <td>
+                            <input type="text" 
+                                   id="snippet_id" 
+                                   name="snippet_id" 
+                                   value="<?php echo esc_attr($data['id']); ?>" 
+                                   class="regular-text" 
+                                   <?php echo empty($data['id']) ? '' : 'readonly'; ?> />
+                            <p class="description"><?php _e('Unique identifier for the snippet (letters, numbers, hyphens, underscores only).', 'simply-code'); ?></p>
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <th scope="row">
+                            <label for="snippet_title"><?php _e('Title', 'simply-code'); ?></label>
+                        </th>
+                        <td>
+                            <input type="text" 
+                                   id="snippet_title" 
+                                   name="snippet_title" 
+                                   value="<?php echo esc_attr($data['title']); ?>" 
+                                   class="regular-text" />
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <th scope="row">
+                            <label for="snippet_description"><?php _e('Description', 'simply-code'); ?></label>
+                        </th>
+                        <td>
+                            <textarea id="snippet_description" 
+                                      name="snippet_description" 
+                                      rows="3" 
+                                      class="large-text"><?php echo esc_textarea($data['description']); ?></textarea>
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <th scope="row">
+                            <label for="snippet_active"><?php _e('Active', 'simply-code'); ?></label>
+                        </th>
+                        <td>
+                            <input type="checkbox" 
+                                   id="snippet_active" 
+                                   name="snippet_active" 
+                                   value="1" 
+                                   <?php checked($data['active']); ?> />
+                            <label for="snippet_active"><?php _e('Enable this snippet', 'simply-code'); ?></label>
+                        </td>
+                    </tr>
+                </table>
             </div>
-
-            <div class="sc-tab-content">
-                <div id="php" class="sc-tab-pane active">
-                    <textarea name="php_code" id="php_code" class="large-text code" rows="20"><?php echo esc_textarea($php_code); ?></textarea>
-                </div>
-                
-                <div id="js" class="sc-tab-pane">
-                    <textarea name="js_code" id="js_code" class="large-text code" rows="20"><?php echo esc_textarea($js_code); ?></textarea>
-                </div>
-                
-                <div id="css" class="sc-tab-pane">
-                    <textarea name="css_code" id="css_code" class="large-text code" rows="20"><?php echo esc_textarea($css_code); ?></textarea>
+        </div>
+        
+        <!-- Component Tabs -->
+        <div class="postbox">
+            <h2 class="hndle"><?php _e('Components', 'simply-code'); ?></h2>
+            <div class="inside">
+                <div class="snippet-tabs">
+                    <div class="snippet-tab-nav">
+                        <button type="button" class="tab-button active" data-tab="php">
+                            PHP <?php if (!empty($data['components']['php'])): ?><span class="has-content">●</span><?php endif; ?>
+                        </button>
+                        <button type="button" class="tab-button" data-tab="js">
+                            JavaScript <?php if (!empty($data['components']['js'])): ?><span class="has-content">●</span><?php endif; ?>
+                        </button>
+                        <button type="button" class="tab-button" data-tab="css">
+                            CSS <?php if (!empty($data['components']['css'])): ?><span class="has-content">●</span><?php endif; ?>
+                        </button>
+                    </div>
+                    
+                    <!-- PHP Component -->
+                    <div class="tab-content active" id="tab-php">
+                        <div class="component-header">
+                            <label>
+                                <input type="checkbox" 
+                                       name="snippet_php_enabled" 
+                                       value="1" 
+                                       <?php checked(in_array('php', $data['components_enabled']) || !empty($data['components']['php'])); ?> />
+                                <?php _e('Enable PHP Component', 'simply-code'); ?>
+                            </label>
+                        </div>
+                        <textarea name="snippet_php_content" 
+                                  class="large-text code-editor" 
+                                  rows="15"
+                                  placeholder="<?php _e('Enter your PHP code here...', 'simply-code'); ?>"><?php echo esc_textarea($data['components']['php']); ?></textarea>
+                    </div>
+                    
+                    <!-- JavaScript Component -->
+                    <div class="tab-content" id="tab-js">
+                        <div class="component-header">
+                            <label>
+                                <input type="checkbox" 
+                                       name="snippet_js_enabled" 
+                                       value="1" 
+                                       <?php checked(in_array('js', $data['components_enabled']) || !empty($data['components']['js'])); ?> />
+                                <?php _e('Enable JavaScript Component', 'simply-code'); ?>
+                            </label>
+                        </div>
+                        <textarea name="snippet_js_content" 
+                                  class="large-text code-editor" 
+                                  rows="15"
+                                  placeholder="<?php _e('Enter your JavaScript code here...', 'simply-code'); ?>"><?php echo esc_textarea($data['components']['js']); ?></textarea>
+                    </div>
+                    
+                    <!-- CSS Component -->
+                    <div class="tab-content" id="tab-css">
+                        <div class="component-header">
+                            <label>
+                                <input type="checkbox" 
+                                       name="snippet_css_enabled" 
+                                       value="1" 
+                                       <?php checked(in_array('css', $data['components_enabled']) || !empty($data['components']['css'])); ?> />
+                                <?php _e('Enable CSS Component', 'simply-code'); ?>
+                            </label>
+                        </div>
+                        <textarea name="snippet_css_content" 
+                                  class="large-text code-editor" 
+                                  rows="15"
+                                  placeholder="<?php _e('Enter your CSS code here...', 'simply-code'); ?>"><?php echo esc_textarea($data['components']['css']); ?></textarea>
+                    </div>
                 </div>
             </div>
         </div>
-
-        <?php submit_button(); ?>
+        
+        <?php submit_button(__('Save Snippet', 'simply-code')); ?>
+        
+        <a href="<?php echo admin_url('admin.php?page=simply-code'); ?>" class="button button-secondary">
+            <?php _e('Cancel', 'simply-code'); ?>
+        </a>
+        
+        <?php if (!empty($data['id'])): ?>
+            <a href="<?php echo wp_nonce_url(
+                add_query_arg(
+                    array('page' => 'simply-code', 'action' => 'delete', 'id' => $data['id']),
+                    admin_url('admin.php')
+                ),
+                'sc_delete_snippet_' . $data['id']
+            ); ?>" 
+               class="button button-link-delete" 
+               onclick="return confirm('<?php _e('Are you sure you want to delete this snippet?', 'simply-code'); ?>')">
+                <?php _e('Delete', 'simply-code'); ?>
+            </a>
+        <?php endif; ?>
     </form>
 </div>
 
+<script>
+jQuery(document).ready(function($) {
+    // Tab navigation
+    $('.tab-button').click(function() {
+        var tabId = $(this).data('tab');
+        
+        // Update active tab button
+        $('.tab-button').removeClass('active');
+        $(this).addClass('active');
+        
+        // Show active tab content
+        $('.tab-content').removeClass('active');
+        $('#tab-' + tabId).addClass('active');
+    });
+    
+    // Form validation
+    $('#snippet-editor-form').submit(function() {
+        var snippetId = $('#snippet_id').val().trim();
+        if (snippetId === '') {
+            alert('<?php _e('Please enter a snippet ID.', 'simply-code'); ?>');
+            $('#snippet_id').focus();
+            return false;
+        }
+        return true;
+    });
+});
+</script>
+
 <style>
-.sc-tabs-wrapper {
-    margin: 20px 0;
-    border: 1px solid #c3c4c7;
-    border-radius: 3px;
-    background: #fff;
+.postbox {
+    margin-bottom: 20px;
 }
 
-.sc-tab-buttons {
-    display: flex;
-    border-bottom: 1px solid #c3c4c7;
-    background: #f0f0f1;
+.hndle {
+    font-size: 14px;
+    padding: 8px 12px;
+    margin: 0;
+    line-height: 1.4;
 }
 
-.sc-tab-button {
-    background: none;
-    border: none;
-    padding: 12px 16px;
+.inside {
+    padding: 0 12px 12px;
+}
+
+.snippet-tabs {
+    margin-top: 10px;
+}
+
+.snippet-tab-nav {
+    border-bottom: 1px solid #ccc;
+    margin-bottom: 0;
+}
+
+.tab-button {
+    background: #f1f1f1;
+    border: 1px solid #ccc;
+    border-bottom: none;
+    padding: 8px 16px;
+    margin-bottom: -1px;
     cursor: pointer;
-    font-weight: 500;
-    border-right: 1px solid #c3c4c7;
-    transition: all 0.1s ease-in-out;
+    border-radius: 3px 3px 0 0;
+    margin-right: 2px;
 }
 
-.sc-tab-button:last-child {
-    border-right: none;
-}
-
-.sc-tab-button:hover {
-    background: #ddd;
-}
-
-.sc-tab-button.active {
+.tab-button.active {
     background: #fff;
-    color: #1d2327;
-    box-shadow: inset 0 -1px 0 #fff;
+    border-bottom: 1px solid #fff;
+    position: relative;
 }
 
-.sc-tab-content {
-    padding: 0;
+.tab-button:hover:not(.active) {
+    background: #e5e5e5;
 }
 
-.sc-tab-pane {
+.has-content {
+    color: #0073aa;
+    margin-left: 5px;
+}
+
+.tab-content {
     display: none;
-    padding: 15px;
+    padding: 15px 0;
 }
 
-.sc-tab-pane.active {
+.tab-content.active {
     display: block;
 }
 
-.sc-tab-pane textarea {
+.component-header {
+    margin-bottom: 10px;
+    padding: 10px;
+    background: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+}
+
+.code-editor {
+    font-family: Consolas, Monaco, monospace;
+    font-size: 13px;
+    background-color: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    padding: 10px;
     width: 100%;
-    font-family: monospace;
+    box-sizing: border-box;
     resize: vertical;
 }
+
+.form-table th {
+    width: 200px;
+    padding: 15px 10px 15px 0;
+}
+
+.form-table td {
+    padding: 15px 10px;
+}
 </style>
-
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const tabButtons = document.querySelectorAll('.sc-tab-button');
-    const tabPanes = document.querySelectorAll('.sc-tab-pane');
-
-    tabButtons.forEach(button => {
-        button.addEventListener('click', function() {
-            const tabId = this.getAttribute('data-tab');
-            
-            // Remove active class from all buttons and panes
-            tabButtons.forEach(btn => btn.classList.remove('active'));
-            tabPanes.forEach(pane => pane.classList.remove('active'));
-            
-            // Add active class to current button and pane
-            this.classList.add('active');
-            document.getElementById(tabId).classList.add('active');
-        });
-    });
-    
-    // Auto-select first tab if none is active
-    if (document.querySelectorAll('.sc-tab-button.active').length === 0) {
-        document.querySelector('.sc-tab-button').click();
-    }
-});
-</script>

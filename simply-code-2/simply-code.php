@@ -3,7 +3,7 @@
  * Plugin Name: Simply Code
  * Plugin URI: https://github.com/DavidCamejo/simply-code
  * Description: A minimalist plugin to run custom code snippets using JSON files instead of database.
- * Version: 1.2.4
+ * Version: 1.2.5
  * Author: David Camejo
  * Text Domain: simply-code
  */
@@ -11,13 +11,13 @@
 if (!defined('ABSPATH')) exit;
 
 // Define constants
-define('SC_VERSION', '1.2.4');
+define('SC_VERSION', '1.2.5');
 define('SC_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('SC_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('SC_ADMIN_DIR', SC_PLUGIN_DIR . 'admin');
 define('SC_INCLUDES_DIR', SC_PLUGIN_DIR . 'includes');
 define('SC_ASSETS_DIR', SC_PLUGIN_DIR . 'assets');
-define('SC_STORAGE_DIR', SC_PLUGIN_DIR . 'storage');
+define('SC_STORAGE_PATH', SC_PLUGIN_DIR . 'storage');
 
 // Autoload classes
 function simply_code_autoload($class) {
@@ -135,6 +135,10 @@ class Simply_Code {
             case 'edit':
                 $this->render_editor_page($id);
                 break;
+            case 'delete':
+                $this->handle_delete_snippet();
+                $this->render_snippets_list();
+                break;
             default:
                 $this->render_snippets_list();
                 break;
@@ -142,12 +146,6 @@ class Simply_Code {
     }
     
     public function render_editor_page($id = '') {
-        // Verificar que el archivo exista antes de crear la instancia
-        $editor_file = SC_ADMIN_DIR . '/class-snippet-editor.php';
-        if (!file_exists($editor_file)) {
-            wp_die(__('Editor class file not found.', 'simply-code'));
-        }
-        
         $editor = new Simply_Code_Snippet_Editor();
         $editor->render_editor($id);
     }
@@ -158,8 +156,6 @@ class Simply_Code {
         if (!file_exists($view_file)) {
             echo '<div class="wrap"><h1>' . __('Simply Code', 'simply-code') . '</h1>';
             echo '<div class="notice notice-error"><p>' . __('Snippets list view file not found.', 'simply-code') . '</p></div>';
-            echo '<p>Expected file: ' . esc_html($view_file) . '</p>';
-            echo '<p>Current directory: ' . esc_html(SC_PLUGIN_DIR) . '</p>';
             echo '</div>';
             return;
         }
@@ -170,6 +166,29 @@ class Simply_Code {
         
         // Pasar datos a la vista
         include_once $view_file;
+    }
+    
+    public function handle_delete_snippet() {
+        if (!isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'sc_delete_snippet_' . $_GET['id'])) {
+            wp_die(__('Permission denied.', 'simply-code'));
+        }
+        
+        if (!current_user_can('manage_options')) {
+            wp_die(__('You do not have permission to perform this action.', 'simply-code'));
+        }
+        
+        $id = sanitize_file_name($_GET['id']);
+        $manager = Simply_Code_Snippet_Manager::get_instance();
+        
+        if ($manager->delete_snippet($id)) {
+            add_action('admin_notices', function() {
+                echo '<div class="notice notice-success is-dismissible"><p>' . __('Snippet deleted successfully.', 'simply-code') . '</p></div>';
+            });
+        } else {
+            add_action('admin_notices', function() {
+                echo '<div class="notice notice-error is-dismissible"><p>' . __('Error deleting snippet.', 'simply-code') . '</p></div>';
+            });
+        }
     }
     
     public function handle_admin_actions() {
@@ -218,14 +237,14 @@ add_action('plugins_loaded', function() {
 register_activation_hook(__FILE__, function() {
     // Create directories
     $dirs = [
-        SC_STORAGE_DIR . '/snippets',
-        SC_STORAGE_DIR . '/js',
-        SC_STORAGE_DIR . '/css',
-        SC_STORAGE_DIR . '/backups'
+        SC_STORAGE_PATH . '/snippets',
+        SC_STORAGE_PATH . '/js',
+        SC_STORAGE_PATH . '/css',
+        SC_STORAGE_PATH . '/backups'
     ];
     
     foreach ($dirs as $dir) {
-        if (!is_dir($dir)) {
+        if (!file_exists($dir)) {
             wp_mkdir_p($dir);
         }
     }

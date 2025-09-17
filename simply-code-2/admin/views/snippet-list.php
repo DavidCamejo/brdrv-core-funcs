@@ -1,16 +1,17 @@
 <?php
 /**
- * Snippets List View
+ * Snippets list view showing components
  */
-if (!defined('ABSPATH')) exit;
-
-$manager = Simply_Code_Snippet_Manager::get_instance();
-$snippets = $manager->get_all_snippets();
+if (!defined('ABSPATH')) {
+    exit;
+}
 ?>
 
 <div class="wrap">
     <h1 class="wp-heading-inline"><?php _e('Snippets', 'simply-code'); ?></h1>
-    <a href="<?php echo esc_url(admin_url('admin.php?page=simply-code-editor')); ?>" class="page-title-action"><?php _e('Add New', 'simply-code'); ?></a>
+    <a href="<?php echo admin_url('admin.php?page=simply-code-editor'); ?>" class="page-title-action">
+        <?php _e('Add New', 'simply-code'); ?>
+    </a>
     
     <hr class="wp-header-end">
     
@@ -22,81 +23,63 @@ $snippets = $manager->get_all_snippets();
         <table class="wp-list-table widefat fixed striped">
             <thead>
                 <tr>
-                    <th scope="col" class="manage-column column-name column-primary"><?php _e('Name', 'simply-code'); ?></th>
-                    <th scope="col" class="manage-column column-description"><?php _e('Description', 'simply-code'); ?></th>
-                    <th scope="col" class="manage-column column-type"><?php _e('Type', 'simply-code'); ?></th>
-                    <th scope="col" class="manage-column column-status"><?php _e('Status', 'simply-code'); ?></th>
-                    <th scope="col" class="manage-column column-date"><?php _e('Modified', 'simply-code'); ?></th>
-                    <th scope="col" class="manage-column column-actions"><?php _e('Actions', 'simply-code'); ?></th>
+                    <th><?php _e('Title', 'simply-code'); ?></th>
+                    <th><?php _e('ID', 'simply-code'); ?></th>
+                    <th><?php _e('Components', 'simply-code'); ?></th>
+                    <th><?php _e('Status', 'simply-code'); ?></th>
+                    <th><?php _e('Modified', 'simply-code'); ?></th>
+                    <th><?php _e('Actions', 'simply-code'); ?></th>
                 </tr>
             </thead>
             <tbody>
                 <?php foreach ($snippets as $id => $snippet): ?>
                     <tr>
-                        <td class="column-name has-row-actions column-primary" data-colname="<?php esc_attr_e('Name', 'simply-code'); ?>">
+                        <td>
                             <strong>
-                                <a href="<?php echo esc_url(admin_url('admin.php?page=simply-code-editor&action=edit&id=' . $id)); ?>" class="row-title">
-                                    <?php echo esc_html($snippet['name']); ?>
+                                <a href="<?php echo admin_url('admin.php?page=simply-code-editor&id=' . urlencode($id)); ?>">
+                                    <?php echo esc_html(isset($snippet['title']) ? $snippet['title'] : $id); ?>
                                 </a>
                             </strong>
-                            <div class="row-actions">
-                                <span class="edit">
-                                    <a href="<?php echo esc_url(admin_url('admin.php?page=simply-code-editor&action=edit&id=' . $id)); ?>">
-                                        <?php _e('Edit', 'simply-code'); ?>
-                                    </a> | 
-                                </span>
-                                <?php if ($snippet['active']): ?>
-                                    <span class="deactivate">
-                                        <a href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=deactivate_snippet&id=' . $id), 'toggle_snippet')); ?>" class="sc-confirm-delete">
-                                            <?php _e('Deactivate', 'simply-code'); ?>
-                                        </a> | 
-                                    </span>
-                                <?php else: ?>
-                                    <span class="activate">
-                                        <a href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=activate_snippet&id=' . $id), 'toggle_snippet')); ?>">
-                                            <?php _e('Activate', 'simply-code'); ?>
-                                        </a> | 
-                                    </span>
-                                <?php endif; ?>
-                                <span class="delete">
-                                    <a href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=delete_snippet&id=' . $id), 'delete_snippet')); ?>" class="submitdelete sc-confirm-delete">
-                                        <?php _e('Delete', 'simply-code'); ?>
-                                    </a>
-                                </span>
-                            </div>
-                        </td>
-                        <td class="column-description" data-colname="<?php esc_attr_e('Description', 'simply-code'); ?>">
-                            <?php echo esc_html($snippet['description'] ?: __('No description', 'simply-code')); ?>
-                        </td>
-                        <td class="column-type" data-colname="<?php esc_attr_e('Type', 'simply-code'); ?>">
-                            <?php
-                            $types = [];
-                            if (!empty($snippet['php'])) $types[] = 'PHP';
-                            if (!empty($snippet['js'])) $types[] = 'JS';
-                            if (!empty($snippet['css'])) $types[] = 'CSS';
-                            echo esc_html(implode(', ', $types) ?: __('None', 'simply-code'));
-                            ?>
-                        </td>
-                        <td class="column-status" data-colname="<?php esc_attr_e('Status', 'simply-code'); ?>">
-                            <?php if ($snippet['active']): ?>
-                                <span class="sc-status-active"><?php _e('Active', 'simply-code'); ?></span>
-                            <?php else: ?>
-                                <span class="sc-status-inactive"><?php _e('Inactive', 'simply-code'); ?></span>
+                            <?php if (!empty($snippet['description'])): ?>
+                                <p class="snippet-description"><?php echo esc_html($snippet['description']); ?></p>
                             <?php endif; ?>
                         </td>
-                        <td class="column-date" data-colname="<?php esc_attr_e('Modified', 'simply-code'); ?>">
+                        <td><?php echo esc_html($id); ?></td>
+                        <td>
                             <?php 
-                            $modified = $snippet['updated_at'] ?? $snippet['created_at'] ?? '';
-                            if ($modified) {
-                                echo esc_html(date_i18n(get_option('date_format'), strtotime($modified)));
-                            } else {
-                                _e('Unknown', 'simply-code');
-                            }
+                            $components = isset($snippet['components_enabled']) ? $snippet['components_enabled'] : array();
+                            if (empty($components)):
+                                echo '<span class="no-components">' . __('None', 'simply-code') . '</span>';
+                            else:
+                                foreach ($components as $component):
+                                    $class = 'component-badge component-' . $component;
+                                    echo '<span class="' . $class . '">' . strtoupper($component) . '</span> ';
+                                endforeach;
+                            endif;
                             ?>
                         </td>
-                        <td class="column-actions" data-colname="<?php esc_attr_e('Actions', 'simply-code'); ?>">
-                            <a href="<?php echo esc_url(admin_url('admin.php?page=simply-code&action=view-backups&id=' . $id)); ?>" class="button button-small">
-                                <?php _e('Backups', 'simply-code'); ?>
+                        <td>
+                            <?php if (isset($snippet['active']) && $snippet['active']): ?>
+                                <span class="snippet-status-active"><?php _e('Active', 'simply-code'); ?></span>
+                            <?php else: ?>
+                                <span class="snippet-status-inactive"><?php _e('Inactive', 'simply-code'); ?></span>
+                            <?php endif; ?>
+                        </td>
+                        <td><?php echo isset($snippet['modified']) ? esc_html($snippet['modified']) : __('Never', 'simply-code'); ?></td>
+                        <td>
+                            <a href="<?php echo admin_url('admin.php?page=simply-code-editor&id=' . urlencode($id)); ?>" class="button button-primary">
+                                <?php _e('Edit', 'simply-code'); ?>
+                            </a>
+                            <a href="<?php echo wp_nonce_url(
+                                add_query_arg(
+                                    array('page' => 'simply-code', 'action' => 'delete', 'id' => $id),
+                                    admin_url('admin.php')
+                                ),
+                                'sc_delete_snippet_' . $id
+                            ); ?>" 
+                               class="button button-secondary" 
+                               onclick="return confirm('<?php _e('Are you sure you want to delete this snippet?', 'simply-code'); ?>')">
+                                <?php _e('Delete', 'simply-code'); ?>
                             </a>
                         </td>
                     </tr>
@@ -107,33 +90,48 @@ $snippets = $manager->get_all_snippets();
 </div>
 
 <style>
-.sc-status-active {
-    color: #00a32a;
+.snippet-description {
+    margin: 5px 0 0 0;
+    font-style: italic;
+    color: #666;
+    font-size: 12px;
+}
+
+.component-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: bold;
+    margin: 0 2px;
+}
+
+.component-php {
+    background-color: #8892BF;
+    color: white;
+}
+
+.component-js {
+    background-color: #F7DF1E;
+    color: black;
+}
+
+.component-css {
+    background-color: #1E90FF;
+    color: white;
+}
+
+.no-components {
+    color: #999;
+    font-style: italic;
+}
+
+.snippet-status-active {
+    color: #00A32A;
     font-weight: bold;
 }
 
-.sc-status-inactive {
-    color: #d63638;
-    font-weight: bold;
-}
-
-.row-actions .sc-confirm-delete {
-    color: #d63638;
-}
-
-.wp-list-table .column-name { width: 25%; }
-.wp-list-table .column-description { width: 30%; }
-.wp-list-table .column-type { width: 10%; }
-.wp-list-table .column-status { width: 10%; }
-.wp-list-table .column-date { width: 15%; }
-.wp-list-table .column-actions { width: 10%; }
-
-@media screen and (max-width: 782px) {
-    .wp-list-table .column-type,
-    .wp-list-table .column-status,
-    .wp-list-table .column-date,
-    .wp-list-table .column-actions {
-        display: none;
-    }
+.snippet-status-inactive {
+    color: #DC3232;
 }
 </style>
