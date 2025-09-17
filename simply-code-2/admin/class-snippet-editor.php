@@ -17,9 +17,17 @@ class Simply_Code_Snippet_Editor {
     public function render_editor($id = '') {
         $snippet = null;
         $is_new = empty($id);
-        
+
         if (!$is_new) {
-            $snippet = $this->manager->get_snippet($id);
+            // Hacer backup antes de editar
+            $this->manager->backup_snippet_before_edit($id);
+            // Cargar snippet con contenido real
+            $snippet = $this->manager->get_snippet_for_editor($id);
+        }
+
+        if (!$is_new) {
+            // ✅ USAR EL NUEVO MÉTODO QUE CARGA EL CONTENIDO REAL
+            $snippet = $this->manager->get_snippet_for_editor($id);
         }
         
         $data = array(
@@ -109,5 +117,44 @@ class Simply_Code_Snippet_Editor {
                 echo '<div class="notice notice-error"><p>' . __('Error saving snippet.', 'simply-code') . '</p></div>';
             });
         }
+    }
+
+    /**
+     * Backup snippet before editing
+     */
+    public function backup_snippet_before_edit($id) {
+        $backup_dir = SC_STORAGE_PATH . '/backups/';
+        
+        if (!file_exists($backup_dir)) {
+            wp_mkdir_p($backup_dir);
+        }
+        
+        $timestamp = date('Y-m-d-H-i-s');
+        $backup_subdir = $backup_dir . $id . '/';
+        
+        if (!file_exists($backup_subdir)) {
+            wp_mkdir_p($backup_subdir);
+        }
+        
+        // Copy JSON metadata
+        $source_json = SC_STORAGE_PATH . '/snippets/' . $id . '.json';
+        $backup_json = $backup_subdir . $id . '-' . $timestamp . '.json';
+        
+        if (file_exists($source_json)) {
+            copy($source_json, $backup_json);
+        }
+        
+        // Copy component files
+        $components = array('php', 'js', 'css');
+        foreach ($components as $component) {
+            $source_file = SC_STORAGE_PATH . '/snippets/' . $id . '.' . $component;
+            $backup_file = $backup_subdir . $id . '-' . $timestamp . '.' . $component;
+            
+            if (file_exists($source_file)) {
+                copy($source_file, $backup_file);
+            }
+        }
+        
+        return true;
     }
 }
